@@ -153,17 +153,9 @@ export default function App() {
   const handleParse = async () => {
     const url = urlInput.trim();
     if (!url) return;
-    // Graceful fallback: no API key → open manual entry with URL pre-filled
-    if (!hasApiKey) {
-      setManualData({ ...emptyManual, url });
-      setPanel('manual');
-      setUrlInput('');
-      showToast('Add your details manually, or add an API key in Settings for auto-parsing.');
-      return;
-    }
     setParsing(true); setError(''); setParseMsg('Fetching posting...');
     try {
-      setParseMsg('Extracting details...');
+      setParseMsg('Reading page...');
       const p = await parseJobUrl(url);
       const job = {
         id: crypto.randomUUID(),
@@ -314,17 +306,17 @@ export default function App() {
       </header>
 
       {/* ── Welcome Banner ── */}
-      {!hasApiKey && !dismissedWelcome && (
+      {!dismissedWelcome && (
         <div className="welcome-banner anim-in">
           <div className="wb-body">
-            <h2 className="wb-title">Welcome to Opportunity Tracker</h2>
+            <h2 className="wb-title">Welcome to Hustle</h2>
             <p className="wb-text">
-              The app works fully without an API key — add positions manually, track status, filter by skills, and take notes.
-              Add a <strong>Claude API key</strong> in Settings to unlock auto-parsing from job URLs and AI cover letter generation.
+              Paste any job URL — Hustle scrapes it automatically, no API key needed. Extracts title, salary, skills, union status, visa sponsorship, and worker protections.
+              Add a <strong>Claude API key</strong> in Settings to also unlock skills match analysis and AI cover letter generation.
             </p>
             <div className="wb-actions">
-              <button className="btn-primary small" onClick={() => { setPanel('settings'); dismissWelcome(); }}>Add API Key in Settings</button>
               <button className="sample-btn" onClick={() => { loadSamples(); dismissWelcome(); }}>Try sample positions</button>
+              <button className="sample-btn" onClick={() => { setPanel('settings'); dismissWelcome(); }}>Add API Key (optional)</button>
             </div>
           </div>
           <button className="wb-dismiss" onClick={dismissWelcome} aria-label="Dismiss">✕</button>
@@ -373,7 +365,7 @@ export default function App() {
       <div className="url-bar">
         <div className="url-wrap">
           <span className="url-icon">🔗</span>
-          <input className="url-input" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleParse()} placeholder={hasApiKey ? 'Paste a job posting URL to auto-parse with AI...' : 'Paste a URL — or add an API key in Settings for auto-parsing'} disabled={parsing} />
+          <input className="url-input" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleParse()} placeholder="Paste a job posting URL to auto-extract details..." disabled={parsing} />
         </div>
         <button className="url-btn" onClick={handleParse} disabled={parsing}>
           {parsing ? parseMsg || 'Reading...' : 'Add'}
