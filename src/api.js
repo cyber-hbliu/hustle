@@ -104,15 +104,28 @@ function formatSalary(baseSalary, bodyText) {
   return parseSalary(bodyText);
 }
 
+function cleanDescription(raw) {
+  if (!raw) return '';
+  let text = cleanText(raw);
+  // Skip leading nav/breadcrumb junk (common on SPAs like DoorDash, Greenhouse, Lever)
+  // Find the first sentence that looks like real job content
+  const contentStart = text.search(
+    /\b(about\s+the\s+(team|role|company|position|job)|the\s+role|job\s+description|responsibilities|what\s+you.{0,15}(do|build|work|own)|we\s+are\s+(looking|hiring|seeking)|overview|who\s+we\s+are|about\s+us)\b/i
+  );
+  if (contentStart > 0 && contentStart < 600) text = text.slice(contentStart);
+  return text.slice(0, 1200).trim();
+}
+
 function fromJsonLd(job, bodyText) {
-  const combined = bodyText + ' ' + cleanText(job.description || '');
+  const rawDesc = cleanDescription(job.description || '');
+  const combined = bodyText + ' ' + rawDesc;
   return {
     position: job.title?.trim() || '',
     company: job.hiringOrganization?.name?.trim() || '',
     location: formatLocation(Array.isArray(job.jobLocation) ? job.jobLocation[0] : job.jobLocation),
     salary: formatSalary(job.baseSalary, bodyText),
     benefits: cleanText(job.jobBenefits || ''),
-    description: cleanText(job.description || '').slice(0, 1500),
+    description: rawDesc,
     qualifications: cleanText(job.qualifications || job.experienceRequirements || '').slice(0, 600),
     deadline: (job.validThrough || '').split('T')[0] || '',
     skills: extractSkills(combined),
@@ -123,23 +136,41 @@ function fromJsonLd(job, bodyText) {
   };
 }
 
-function fromHtmlFallback(doc, bodyText) {
-  const selectors = {
-    position: '[class*="job-title"],[class*="jobtitle"],[id*="job-title"],[data-testid*="job-title"],h1',
-    company: '[class*="company-name"],[class*="employer"],[class*="org-name"],[itemprop="name"]',
-    location: '[class*="location"],[itemprop="jobLocation"],[data-testid*="location"]',
-  };
-  const pick = (sel) => doc.querySelector(sel)?.textContent?.trim() || '';
+function findDescriptionContainer(doc) {
+  // Ordered by specificity — most job boards use one of these
+  const candidates = [
+    '[class*="job-description"]',
+    '[class*="jobDescription"]',
+    '[data-testid*="job-description"]',
+    '[class*="description__text"]',
+    '[class*="jobDescriptionContent"]',
+    '[class*="job-details"]',
+    '[class*="posting-content"]',
+    'article',
+    'main',
+  ];
+  for (const sel of candidates) {
+    const el = doc.querySelector(sel);
+    if (el && el.textContent.trim().length > 200) {
+      return el.textContent.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return '';
+}
 
-  const title = pick(selectors.position) || doc.title.split(/[-|·:]/)[0].trim();
+function fromHtmlFallback(doc, bodyText) {
+  const pick = (sel) => doc.querySelector(sel)?.textContent?.trim() || '';
+  const title = pick('[class*="job-title"],[class*="jobtitle"],[id*="job-title"],[data-testid*="job-title"],h1')
+    || doc.title.split(/[-|·:]/)[0].trim();
+  const desc = cleanDescription(findDescriptionContainer(doc) || bodyText);
 
   return {
     position: title,
-    company: pick(selectors.company),
-    location: pick(selectors.location),
+    company: pick('[class*="company-name"],[class*="employer"],[class*="org-name"]'),
+    location: pick('[class*="location"],[itemprop="jobLocation"],[data-testid*="location"]'),
     salary: parseSalary(bodyText),
     benefits: '',
-    description: bodyText.slice(0, 1500),
+    description: desc,
     qualifications: '',
     deadline: '',
     skills: extractSkills(bodyText),

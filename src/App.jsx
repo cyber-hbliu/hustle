@@ -90,7 +90,7 @@ const save = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 // ─── App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [jobs, setJobs] = useState(() => load('hs-jobs', []));
-  const [filter, setFilter] = useState('all');
+  const [activeTab, setActiveTab] = useState('jobs');
   const [skillFilter, setSkillFilter] = useState(null);
   const [urlInput, setUrlInput] = useState('');
   const [parsing, setParsing] = useState(false);
@@ -138,16 +138,20 @@ export default function App() {
   // ── Filtering ──
   const filtered = useMemo(() => {
     let list = jobs;
-    if (filter !== 'all') list = list.filter((j) => j.status === filter);
-    if (skillFilter) list = list.filter((j) => (j.skills || []).some((s) => s.toLowerCase() === skillFilter));
+    if (activeTab === 'jobs')      list = list.filter(j => j.status === 'saved');
+    if (activeTab === 'applied')   list = list.filter(j => j.status === 'applied');
+    if (activeTab === 'interview') list = list.filter(j => j.status === 'interview');
+    if (activeTab === 'results')   list = list.filter(j => j.status === 'offer' || j.status === 'rejected');
+    if (skillFilter) list = list.filter(j => (j.skills || []).some(s => s.toLowerCase() === skillFilter));
     return list;
-  }, [jobs, filter, skillFilter]);
+  }, [jobs, activeTab, skillFilter]);
 
-  const counts = useMemo(() => {
-    const c = { all: jobs.length };
-    STATUSES.forEach((s) => { c[s.key] = jobs.filter((j) => j.status === s.key).length; });
-    return c;
-  }, [jobs]);
+  const counts = useMemo(() => ({
+    jobs:      jobs.filter(j => j.status === 'saved').length,
+    applied:   jobs.filter(j => j.status === 'applied').length,
+    interview: jobs.filter(j => j.status === 'interview').length,
+    results:   jobs.filter(j => j.status === 'offer' || j.status === 'rejected').length,
+  }), [jobs]);
 
   // ── Parse URL ──
   const handleParse = async () => {
@@ -395,14 +399,16 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Filter Tabs ── */}
-      <div className="filter-bar">
-        <button className={`f-tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
-          All <span className="f-cnt">{counts.all}</span>
-        </button>
-        {STATUSES.map((s) => (
-          <button key={s.key} className={`f-tab ${filter === s.key ? 'active' : ''}`} onClick={() => setFilter(s.key)} style={filter === s.key ? { '--tc': s.color } : {}}>
-            <span className="f-tab-icon">{s.icon}</span> {s.label} <span className="f-cnt">{counts[s.key]}</span>
+      {/* ── Pipeline Tabs ── */}
+      <div className="tab-bar">
+        {[
+          { key: 'jobs',      label: 'Jobs' },
+          { key: 'applied',   label: 'Applied' },
+          { key: 'interview', label: 'Interview' },
+          { key: 'results',   label: 'Results' },
+        ].map(tab => (
+          <button key={tab.key} className={`tab-btn ${activeTab === tab.key ? 'active' : ''}`} onClick={() => setActiveTab(tab.key)}>
+            {tab.label} <span className="tab-cnt">{counts[tab.key]}</span>
           </button>
         ))}
       </div>
@@ -411,27 +417,24 @@ export default function App() {
       {filtered.length === 0 && (
         <div className="empty">
           <div className="empty-icon">📋</div>
-          <p className="empty-title">{filter === 'all' && !skillFilter ? 'No positions yet' : 'No matching positions'}</p>
-          <p className="empty-sub">{filter === 'all' && !skillFilter ? 'Paste a job URL above, or add one manually' : 'Try adjusting your filters'}</p>
-          {jobs.length === 0 && (
-            <button className="sample-btn" style={{ marginTop: 16 }} onClick={loadSamples}>Load sample positions</button>
-          )}
+          <p className="empty-title">{activeTab === 'jobs' && !skillFilter ? 'No jobs saved yet' : 'Nothing here yet'}</p>
+          <p className="empty-sub">{activeTab === 'jobs' && !skillFilter ? 'Paste a job URL above, or add one manually' : 'Move jobs here as you progress'}</p>
+          {jobs.length === 0 && <button className="sample-btn" style={{ marginTop: 16 }} onClick={loadSamples}>Load sample positions</button>}
         </div>
       )}
 
       {/* ── Job Table ── */}
       {filtered.length > 0 && (
         <div className="job-table">
-          {/* Column headers */}
           <div className="table-head">
-            <div className="th col-role">Role</div>
-            <div className="th col-loc">Location & Pay</div>
-            <div className="th col-skills">Skills</div>
-            <div className="th col-protect">Protections</div>
-            <div className="th col-status">Status</div>
+            <div className="th col-pos">Position</div>
+            <div className="th col-loc">Location</div>
+            <div className="th col-sal">Salary</div>
+            <div className="th col-spon">Sponsorship</div>
+            <div className="th col-skills">Key Skills</div>
+            <div className="th col-apply">Apply</div>
           </div>
 
-          {/* Rows */}
           {filtered.map((job) => {
             const dl = deadlineTag(job.deadline);
             const st = statusMap[job.status] || statusMap.saved;
@@ -439,45 +442,51 @@ export default function App() {
 
             return (
               <div key={job.id} className={`table-row ${isOpen ? 'expanded' : ''}`}>
-                {/* ── 5-Column Row ── */}
+                {/* ── 6-Column Row ── */}
                 <div className="row-cells" onClick={() => toggleExpand(job)}>
-                  {/* 1. Role */}
-                  <div className="cell col-role">
+                  {/* 1. Position */}
+                  <div className="cell col-pos">
                     <span className="cell-title">{job.position}</span>
                     {job.company && <span className="cell-sub">{job.company}</span>}
+                    {dl && <span className="deadline-tag" style={{ color: dl.c }}>⏰ {dl.t}</span>}
                   </div>
 
-                  {/* 2. Location & Pay */}
+                  {/* 2. Location */}
                   <div className="cell col-loc">
-                    {job.location && <span className="cell-line">📍 {job.location}</span>}
-                    {job.salary && <span className="cell-line">💰 {job.salary}</span>}
-                    {dl && <span className="cell-line" style={{ color: dl.c, fontWeight: 600 }}>⏰ {dl.t}</span>}
+                    {job.location ? <span className="cell-line">📍 {job.location}</span> : <span className="cell-empty">—</span>}
                   </div>
 
-                  {/* 3. Skills */}
+                  {/* 3. Salary */}
+                  <div className="cell col-sal">
+                    {job.salary ? <span className="cell-line salary-val">{job.salary}</span> : <span className="cell-empty">—</span>}
+                  </div>
+
+                  {/* 4. Sponsorship */}
+                  <div className="cell col-spon">
+                    <span className="spon-flag" style={{ color: flagColor(job.sponsorship) }}>Visa: {job.sponsorship}</span>
+                    <span className="spon-flag" style={{ color: flagColor(job.union) }}>Union: {job.union}</span>
+                  </div>
+
+                  {/* 5. Key Skills */}
                   <div className="cell col-skills">
                     <div className="cell-skills">
-                      {(job.skills || []).slice(0, 4).map((s, i) => (
+                      {(job.skills || []).slice(0, 3).map((s, i) => (
                         <span key={i} className={`skill-chip ${skillFilter === s.toLowerCase() ? 'hl' : ''}`}>{s}</span>
                       ))}
-                      {(job.skills || []).length > 4 && <span className="skill-chip more">+{job.skills.length - 4}</span>}
+                      {(job.skills || []).length > 3 && <span className="skill-chip more">+{job.skills.length - 3}</span>}
                     </div>
                   </div>
 
-                  {/* 4. Protections */}
-                  <div className="cell col-protect">
-                    <span className="prot-flag" style={{ color: flagColor(job.sponsorship) }}>
-                      Visa: {job.sponsorship}
-                    </span>
-                    <span className="prot-flag" style={{ color: flagColor(job.union) }}>
-                      Union: {job.union}
-                    </span>
-                    {job.community_focus && <span className="prot-flag community">🤝 Community</span>}
-                  </div>
-
-                  {/* 5. Status */}
-                  <div className="cell col-status">
-                    <span className="status-pill" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                  {/* 6. Apply Yes / No */}
+                  <div className="cell col-apply" onClick={e => e.stopPropagation()}>
+                    {job.status === 'saved' ? (
+                      <div className="apply-btns">
+                        <button className="apply-yes" onClick={() => updateJob(job.id, { status: 'applied' })}>Yes</button>
+                        <button className="apply-no"  onClick={() => deleteJob(job.id)}>No</button>
+                      </div>
+                    ) : (
+                      <span className="status-pill" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                    )}
                   </div>
                 </div>
 
