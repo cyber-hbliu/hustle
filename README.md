@@ -7,26 +7,6 @@ Local-first, AI-powered, no subscription. Tracks what actually matters: union re
 **[Live Demo →](https://cyber-hbliu.github.io/hustle/)** *(live after first deploy)*
 
 ---
-
-## Why Hustle, not Huntr?
-
-Huntr, Careerflow, LoopCV — they track status. They show you what you already know.
-
-Hustle surfaces what they skip:
-
-| Feature | Huntr / Careerflow | **Hustle** |
-|---|---|---|
-| Application status tracking | ✓ | ✓ |
-| Notes per position | ✓ | ✓ |
-| **Union detection** (AFSCME, SEIU, CWA, UAW…) | ✗ | ✓ |
-| **Visa sponsorship** as a first-class field | ✗ | ✓ |
-| **Worker protections** (EEO, ADA, fair chance, language access) | ✗ | ✓ |
-| **Community focus** flagging | ✗ | ✓ |
-| Two-step cover letter (fit analysis first, then letter) | ✗ | ✓ |
-| Local-first — no account, no subscription | ✗ | ✓ |
-
----
-
 ## Three ways to use it
 
 ### (a) Use the hosted version
