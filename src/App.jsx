@@ -138,7 +138,7 @@ export default function App() {
   // ── Filtering ──
   const filtered = useMemo(() => {
     let list = jobs;
-    if (activeTab === 'jobs')      list = list.filter(j => j.status === 'saved');
+    // Jobs tab = master list (all jobs); other tabs are focused pipeline views
     if (activeTab === 'applied')   list = list.filter(j => j.status === 'applied');
     if (activeTab === 'interview') list = list.filter(j => j.status === 'interview');
     if (activeTab === 'results')   list = list.filter(j => j.status === 'offer' || j.status === 'rejected');
@@ -147,7 +147,7 @@ export default function App() {
   }, [jobs, activeTab, skillFilter]);
 
   const counts = useMemo(() => ({
-    jobs:      jobs.filter(j => j.status === 'saved').length,
+    jobs:      jobs.length,
     applied:   jobs.filter(j => j.status === 'applied').length,
     interview: jobs.filter(j => j.status === 'interview').length,
     results:   jobs.filter(j => j.status === 'offer' || j.status === 'rejected').length,
@@ -417,8 +417,8 @@ export default function App() {
       {filtered.length === 0 && (
         <div className="empty">
           <div className="empty-icon">📋</div>
-          <p className="empty-title">{activeTab === 'jobs' && !skillFilter ? 'No jobs saved yet' : 'Nothing here yet'}</p>
-          <p className="empty-sub">{activeTab === 'jobs' && !skillFilter ? 'Paste a job URL above, or add one manually' : 'Move jobs here as you progress'}</p>
+          <p className="empty-title">{!skillFilter ? (activeTab === 'jobs' ? 'No jobs yet' : 'Nothing here yet') : 'No matching positions'}</p>
+          <p className="empty-sub">{activeTab === 'jobs' && !skillFilter ? 'Paste a job URL above, or add one manually' : activeTab === 'jobs' ? 'Try clearing the skill filter' : 'Jobs move here as you progress through the pipeline'}</p>
           {jobs.length === 0 && <button className="sample-btn" style={{ marginTop: 16 }} onClick={loadSamples}>Load sample positions</button>}
         </div>
       )}
@@ -477,15 +477,18 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 6. Apply Yes / No */}
+                  {/* 6. Apply (to-do style) */}
                   <div className="cell col-apply" onClick={e => e.stopPropagation()}>
                     {job.status === 'saved' ? (
-                      <div className="apply-btns">
-                        <button className="apply-yes" onClick={() => updateJob(job.id, { status: 'applied' })}>Yes</button>
-                        <button className="apply-no"  onClick={() => deleteJob(job.id)}>No</button>
-                      </div>
+                      <button className="todo-item" onClick={() => updateJob(job.id, { status: 'applied' })}>
+                        <span className="todo-box" />
+                        <span className="todo-label">Apply</span>
+                      </button>
                     ) : (
-                      <span className="status-pill" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                      <button className="todo-item done" onClick={() => updateJob(job.id, { status: 'saved' })}>
+                        <span className="todo-box checked">✓</span>
+                        <span className="todo-label">{st.label}</span>
+                      </button>
                     )}
                   </div>
                 </div>
