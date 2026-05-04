@@ -7,20 +7,97 @@ export function setApiKey(key) {
 }
 
 // ─── Free Scraping (no API key needed) ────────────────────────────────
-const PROXY = 'https://api.allorigins.win/get?url=';
+
+// Primary: Jina AI Reader — handles JS-rendered pages, no CORS issues, free
+async function fetchViaJina(url) {
+  const res = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { 'Accept': 'text/plain,text/markdown,*/*' },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error(`Jina returned ${res.status}`);
+  const text = await res.text();
+  if (text.length < 300) throw new Error('Too little content returned');
+  return text;
+}
+
+// Fallback: CORS proxy (may be unreliable depending on proxy status)
+const PROXIES = [
+  { url: 'https://corsproxy.io/?', json: false },
+  { url: 'https://api.allorigins.win/get?url=', json: true },
+];
 
 async function fetchPage(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const res = await fetch(PROXY + encodeURIComponent(url), { signal: controller.signal });
-    if (!res.ok) throw new Error(`Proxy returned ${res.status}`);
-    const data = await res.json();
-    if (!data.contents) throw new Error('Page returned empty content');
-    return data.contents;
+    for (const proxy of PROXIES) {
+      try {
+        const res = await fetch(proxy.url + encodeURIComponent(url), { signal: controller.signal });
+        if (!res.ok) continue;
+        if (proxy.json) {
+          const data = await res.json();
+          if (data.contents && data.contents.length > 200) return data.contents;
+        } else {
+          const text = await res.text();
+          if (text.length > 200) return text;
+        }
+      } catch {}
+    }
+    throw new Error('All CORS proxies failed');
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
+function parseFromText(text, url) {
+  const titleMatch = text.match(/^Title:\s*(.+)$/m);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+
+  const contentIdx = text.indexOf('Markdown Content:');
+  const content = contentIdx >= 0 ? text.slice(contentIdx + 'Markdown Content:'.length).trim() : text;
+
+  // Extract company from known ATS URL patterns
+  let company = '';
+  try {
+    const u = new URL(url);
+    const host = u.hostname;
+    const gh = url.match(/boards\.greenhouse\.io\/([^/?#]+)/);
+    const lv = url.match(/jobs\.lever\.co\/([^/?#]+)/);
+    const wd = host.match(/^([^.]+)\.wd\d+\.myworkdayjobs\.com$/);
+    const ash = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
+    const smart = url.match(/boards\.smartrecruiters\.com\/([^/?#]+)/);
+    if (gh) company = gh[1].replace(/-/g, ' ');
+    else if (lv) company = lv[1].replace(/-/g, ' ');
+    else if (wd) company = wd[1].replace(/-/g, ' ');
+    else if (ash) company = ash[1].replace(/-/g, ' ');
+    else if (smart) company = smart[1].replace(/-/g, ' ');
+    else company = host.replace(/^www\./, '').split('.')[0];
+  } catch {}
+
+  // Try to pull a cleaner location from the content
+  const locMatch = content.match(
+    /(?:^|\n)\s*(?:Location|Based in|Office|Where you.{0,10}work)[:\s–-]+([^\n]{5,60})/im
+  ) || content.match(/\b(Remote|Hybrid|On[\s-]?site)[,\s–-]*([A-Z][a-zA-Z\s]+,\s*[A-Z]{2})/);
+  const location = locMatch ? locMatch[1]?.trim().replace(/\*+/g, '') || locMatch[0].trim() : '';
+
+  const desc = content.slice(0, 1400).trim();
+
+  return {
+    position: title,
+    company: company.charAt(0).toUpperCase() + company.slice(1),
+    location: location.slice(0, 80),
+    salary: parseSalary(content),
+    benefits: '',
+    description: desc,
+    qualifications: '',
+    deadline: '',
+    skills: extractSkills(content),
+    sponsorship: detectSponsorship(content),
+    union: detectUnion(content),
+    worker_protections: extractWorkerProtections(content),
+    community_focus: detectCommunityFocus(content),
+  };
 }
 
 function cleanText(str = '') {
@@ -182,24 +259,47 @@ function fromHtmlFallback(doc, bodyText) {
 }
 
 export async function parseJobUrl(url) {
-  const html = await fetchPage(url);
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const bodyText = (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
-
-  // JSON-LD structured data — LinkedIn, Indeed, Glassdoor, USAJOBS all support this
-  for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
-    try {
-      const parsed = JSON.parse(script.textContent);
-      const items = Array.isArray(parsed) ? parsed : [parsed];
-      const job = items.find(i => i?.['@type'] === 'JobPosting');
-      if (job) return fromJsonLd(job, bodyText);
-    } catch {}
+  // Detect login-walled sites before wasting a round trip
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (/\blinkedin\.com\b/.test(host)) throw new Error('LinkedIn requires login to view job details. Copy the key details and use manual entry instead.');
+    if (/\bglassdoor\.com\b/.test(host)) throw new Error('Glassdoor requires login to view job details. Copy the key details and use manual entry instead.');
+    if (/\bindeed\.com\b/.test(host)) throw new Error('Indeed blocks automated access. Copy the job details and paste them into manual entry instead.');
+  } catch (e) {
+    if (e.message.includes('requires login') || e.message.includes('blocks automated')) throw e;
   }
 
-  // HTML heuristic fallback
-  const result = fromHtmlFallback(doc, bodyText);
-  if (!result.position) throw new Error("Couldn't extract details from this page — the site may block automated access. Try manual entry.");
-  return result;
+  // Primary: Jina AI Reader
+  try {
+    const jinaText = await fetchViaJina(url);
+    const result = parseFromText(jinaText, url);
+    if (result.position) return result;
+  } catch (jinaErr) {
+    console.warn('Jina scrape failed:', jinaErr.message);
+  }
+
+  // Fallback: CORS proxy + JSON-LD / HTML heuristics
+  try {
+    const html = await fetchPage(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const bodyText = (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+
+    for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const parsed = JSON.parse(script.textContent);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        const job = items.find(i => i?.['@type'] === 'JobPosting');
+        if (job) return fromJsonLd(job, bodyText);
+      } catch {}
+    }
+
+    const result = fromHtmlFallback(doc, bodyText);
+    if (result.position) return result;
+  } catch (proxyErr) {
+    console.warn('CORS proxy failed:', proxyErr.message);
+  }
+
+  throw new Error("Couldn't extract details from this page — the site may block automated access. Try copying the job details and using manual entry.");
 }
 
 // ─── Optional AI Features (require API key) ────────────────────────────
