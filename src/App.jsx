@@ -187,7 +187,10 @@ export default function App() {
       setUrlInput('');
       showToast('Position added!');
     } catch (err) {
-      setError(err.message);
+      const isAbort = err.name === 'AbortError' || err.name === 'TimeoutError';
+      setError(isAbort
+        ? 'Request timed out — the site took too long to respond. Try manual entry instead.'
+        : err.message || 'Failed to load the job page.');
     } finally {
       setParsing(false); setParseMsg('');
     }

@@ -10,14 +10,20 @@ export function setApiKey(key) {
 
 // Primary: Jina AI Reader — handles JS-rendered pages, no CORS issues, free
 async function fetchViaJina(url) {
-  const res = await fetch(`https://r.jina.ai/${url}`, {
-    headers: { 'Accept': 'text/plain,text/markdown,*/*' },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!res.ok) throw new Error(`Jina returned ${res.status}`);
-  const text = await res.text();
-  if (text.length < 300) throw new Error('Too little content returned');
-  return text;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      headers: { 'Accept': 'text/plain,text/markdown,*/*' },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Jina returned ${res.status}`);
+    const text = await res.text();
+    if (text.length < 300) throw new Error('Too little content returned');
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Fallback: CORS proxy (may be unreliable depending on proxy status)
