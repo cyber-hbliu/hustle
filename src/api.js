@@ -136,33 +136,54 @@ function stripMd(text = '') {
     .trim();
 }
 
-// Extract the role overview — keeps structure, skips company boilerplate
+// Lines that are clearly UI / navigation chrome, not job content
+const NAV_RE = /^(?:skip\s+to|close\b|menu\b|\bHome\b|main\s+nav(?:igation)?|back\s+to|apply\s+now|share\b|save\s+job|log\s*in|sign\s+in|\d+\s+days?\s+ago|posted\s+\d|overview\s*$|breadcrumb|cookie|privacy\s+policy|terms\s+of)/i;
+
+// Extract the role overview as bullet points — skips nav/boilerplate junk
 function extractDescription(content) {
-  // Look for explicit "About the Role / Position Overview" section
-  const roleM = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:about\s+the\s+(?:role|position|opportunity|job|team)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(?:role|position)|department\s+overview|mission\s+or\s+department)\*{0,2}\s*\n+([\s\S]{80,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]{0,60}\*{2}\s*\n|\n---)/im
+  // 1. Try an explicit "About the Role / Position Overview" section header
+  const sectionM = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:about\s+the\s+(?:role|position|opportunity|job|team)|the\s+role|role\s+overview|position\s+overview|job\s+(?:summary|description)|about\s+this\s+(?:role|position)|department\s+overview)\*{0,2}\s*\n+([\s\S]{80,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]{0,60}\*{2}|\n---)/im
   );
 
-  const raw = roleM ? roleM[1] : (() => {
-    // Fallback: skip boilerplate by finding first sentence clearly about this role
-    const lines = content.split('\n').filter(l => l.trim().length > 40);
-    const idx = lines.findIndex(l =>
-      /(?:we(?:'re| are) looking for|you will|this role|join(?:ing)? (?:our|the)|is looking for|seeks? a|will (?:work|report|own|build|lead|support|collaborate))/i.test(l)
-    );
-    return lines.slice(Math.max(0, idx), Math.max(0, idx) + 12).join('\n');
-  })();
+  let raw = sectionM ? sectionM[1] : null;
 
-  // Keep paragraphs and any inline bullet lists — strip only markdown syntax
-  const cleaned = stripMd(raw);
-  // Collect meaningful paragraphs (drop nav/breadcrumb fragments under 40 chars)
-  const paras = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 40);
-  return paras.slice(0, 5).join('\n\n').slice(0, 1400).trim();
+  // 2. Fallback: skip all nav lines, find first lines that look like job content
+  if (!raw) {
+    const cleanLines = content.split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 50 && !NAV_RE.test(l));
+
+    const roleStart = cleanLines.findIndex(l =>
+      /(?:we(?:'re| are) looking for|you will (?:be|work|report|own|join)|this role|the (?:position|role)\s+(?:will|is|reports?)|responsible for|is (?:seeking|looking for)|reports? (?:to|directly)|will (?:work|join|lead|support|build|own|partner))/i.test(l)
+    );
+    const start = roleStart >= 0 && roleStart < 15 ? roleStart : 0;
+    raw = cleanLines.slice(start, start + 12).join('\n');
+  }
+
+  if (!raw || raw.length < 50) return '';
+
+  const text = stripMd(raw);
+
+  // If the section already has bullet-like items, normalise them
+  const inlineBullets = text.match(/(?:[-•*▪◦]|\d+\.)\s+[^\n]{20,}/g);
+  if (inlineBullets && inlineBullets.length >= 2) {
+    return inlineBullets
+      .slice(0, 8)
+      .map(b => '• ' + b.replace(/^[-•*▪◦\d.]+\s*/, '').trim())
+      .join('\n')
+      .slice(0, 1200);
+  }
+
+  // Convert prose into bullet points — one bullet per paragraph/sentence block
+  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 40);
+  return paras.slice(0, 6).map(p => '• ' + p.replace(/^[•\-]\s*/, '')).join('\n').slice(0, 1400).trim();
 }
 
 // Extract duties/responsibilities as structured bullet points
 function extractDuties(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities|position\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n\n)/im
   );
   if (!m) return '';
   const raw = m[1];
@@ -174,8 +195,9 @@ function extractDuties(content) {
       .join('\n')
       .slice(0, 1200);
   }
-  // Fallback: plain sentences
-  return stripMd(raw).split(/\n+/).filter(l => l.length > 25).slice(0, 8).join('\n').slice(0, 900);
+  // Fallback: convert sentences to bullets
+  const lines = stripMd(raw).split(/\n+/).filter(l => l.trim().length > 25 && !NAV_RE.test(l));
+  return lines.slice(0, 8).map(l => '• ' + l.trim().replace(/^[•\-]\s*/, '')).join('\n').slice(0, 900);
 }
 
 // Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
