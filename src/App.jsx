@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { parseJobUrl, analyzeMatch, generateCoverLetter, getApiKey, setApiKey, extractSkills } from './api';
+import { parseJobUrl, analyzeMatch, generateCoverLetter, getApiKey, setApiKey, extractSkills, remigrateJob } from './api';
 
 // ─── Constants ─────────────────────────────────────────────────────────
 const STATUSES = [
@@ -97,13 +97,9 @@ const save = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
 // ─── App ───────────────────────────────────────────────────────────────
 export default function App() {
-  const [jobs, setJobs]             = useState(() => {
-    const stored = load('hs-jobs', []);
-    // Re-extract skills from stored description to clean up false positives
-    return stored.map(j =>
-      j.description ? { ...j, skills: extractSkills(j.description) } : j
-    );
-  });
+  const [jobs, setJobs]             = useState(() =>
+    load('hs-jobs', []).map(remigrateJob)
+  );
   const [activeTab, setActiveTab]   = useState('saved');
   const [urlInput, setUrlInput]     = useState('');
   const [parsing, setParsing]       = useState(false);
@@ -239,6 +235,34 @@ export default function App() {
   const deleteJob = (id) => {
     setJobs(prev => prev.filter(j => j.id !== id));
     if (expandedId === id) { setExpandedId(null); resetCL(); }
+  };
+
+  // ── Rescan: re-fetch and update an existing job's content ──
+  const [rescanning, setRescanning] = useState(null);
+  const handleRescan = async (job) => {
+    if (!job.url) return;
+    setRescanning(job.id);
+    setError('');
+    try {
+      const p = await parseJobUrl(job.url);
+      updateJob(job.id, {
+        position:          p.position  || job.position,
+        company:           p.company   || job.company,
+        location:          p.location  || job.location,
+        salary:            p.salary    || job.salary,
+        description:       p.description || job.description,
+        duties:            p.duties    || job.duties,
+        skills:            Array.isArray(p.skills) && p.skills.length ? p.skills : job.skills,
+        deadline:          p.deadline  || job.deadline,
+        sponsorship:       p.sponsorship || job.sponsorship,
+        union:             p.union     || job.union,
+      });
+      showToast('Job info refreshed!');
+    } catch (err) {
+      setError(err.message || 'Rescan failed.');
+    } finally {
+      setRescanning(null);
+    }
   };
 
   // ── Expand ──
@@ -525,6 +549,15 @@ export default function App() {
                         <a href={job.url} target="_blank" rel="noopener noreferrer" className="link-out">
                           Posting ↗
                         </a>
+                      )}
+                      {job.url && (
+                        <button
+                          className="rescan-btn"
+                          onClick={() => handleRescan(job)}
+                          disabled={rescanning === job.id}
+                        >
+                          {rescanning === job.id ? '…' : '↺ Rescan'}
+                        </button>
                       )}
                       <button className="del-btn" onClick={() => deleteJob(job.id)}>Delete</button>
                     </div>

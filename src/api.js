@@ -124,15 +124,49 @@ function parsePageTitle(rawTitle, atsCompany) {
   return { position, location, company };
 }
 
+// Strip markdown syntax from a string for clean display
+function stripMd(text = '') {
+  return text
+    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Extract the role-specific description paragraph (skip company boilerplate)
+function extractDescription(content) {
+  // Look for "About the Role / Position Overview / Job Summary" section
+  const roleM = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:about\s+the\s+(?:role|position|opportunity|job)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(?:role|position)|department\s+overview)\*{0,2}\s*\n+([\s\S]{80,1000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z]|\n---)/im
+  );
+  if (roleM) return stripMd(roleM[1]).slice(0, 600).trim();
+
+  // Fallback: skip leading boilerplate paragraphs (mission statements, etc.)
+  // and return text starting from the first sentence about the specific role
+  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+  const roleIdx = lines.findIndex(l =>
+    /(?:we are looking for|we.re looking for|you will|this role|join(?:ing)? (?:our|the)|as (?:a |an |the )\w+ analyst|as (?:a |an |the )\w+ engineer|as (?:a |an |the )\w+ manager|senior analyst|senior engineer|staff \w+)/i.test(l)
+  );
+  const startIdx = roleIdx >= 0 && roleIdx < 10 ? roleIdx : 0;
+  return stripMd(lines.slice(startIdx, startIdx + 6).join(' ')).slice(0, 600).trim();
+}
+
 // Extract a duties/responsibilities section from markdown job content
 function extractDuties(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|the role|essential functions)\s*:?\s*\n([\s\S]{30,600}?)(?=\n#{1,3}\s|\n\n[A-Z][^\n]*:\s*\n|\n---|\n\n\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we.{0,10}looking for|the role|essential functions|your (?:day|work|responsibilities))\*{0,2}\s*:?\s*\n([\s\S]{30,800}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n)/im
   );
   if (!m) return '';
-  const bullets = m[1].match(/[-•*▪◦✓]\s*[^\n]+/g) || [];
-  if (bullets.length) return bullets.slice(0, 7).join('\n').trim().slice(0, 500);
-  return m[1].replace(/\n{3,}/g, '\n\n').trim().slice(0, 400);
+  const raw = m[1];
+  // Prefer explicit bullet lists
+  const bullets = raw.match(/(?:[-•*▪◦✓]|\d+\.)\s+[^\n]{10,}/g) || [];
+  if (bullets.length >= 2) {
+    return bullets.slice(0, 7).map(b => '• ' + b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim()).join('\n').slice(0, 600);
+  }
+  // Fallback: plain sentences, take first 4
+  return stripMd(raw).split(/\n+/).filter(l => l.length > 20).slice(0, 4).join('\n').slice(0, 500);
 }
 
 // Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
@@ -180,20 +214,7 @@ function parseFromText(text, url) {
     location = locMatch ? locMatch[1]?.trim().replace(/\*+/g, '') || locMatch[0].trim() : '';
   }
 
-  // Find role-specific description section; skip company mission boilerplate
-  const roleStart = content.search(
-    /(?:^|\n)#{0,3}\s*(?:about\s+the\s+(role|position|opportunity|team)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(role|position))\s*\n/im
-  );
-  const descRaw = roleStart > 0 && roleStart < 1200
-    ? content.slice(roleStart, roleStart + 900)
-    : content.slice(0, 900);
-  const desc = descRaw
-    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/#{1,6}\s+/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-    .slice(0, 700);
+  const desc = extractDescription(content);
 
   return {
     position: parsed.position || rawTitle,
@@ -210,6 +231,18 @@ function parseFromText(text, url) {
     union: detectUnion(content),
     worker_protections: extractWorkerProtections(content),
     community_focus: detectCommunityFocus(content),
+  };
+}
+
+// Clean up already-saved jobs: strip markdown, re-extract skills & duties
+export function remigrateJob(j) {
+  if (!j.description) return j;
+  const cleaned = stripMd(j.description);
+  return {
+    ...j,
+    description: cleaned,
+    skills: extractSkills(j.description),
+    duties: j.duties || extractDuties(j.description),
   };
 }
 

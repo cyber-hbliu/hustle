@@ -409,6 +409,20 @@ body {
 }
 .del-btn:hover { background: #ffe4e6; }
 
+.rescan-btn {
+  font-size: 12px;
+  font-weight: 600;
+  background: #f0f9ff;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  color: #0369a1;
+  font-family: inherit;
+}
+.rescan-btn:hover { background: #e0f2fe; }
+.rescan-btn:disabled { opacity: 0.5; cursor: default; }
+
 .d-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
