@@ -568,7 +568,7 @@ export default function App() {
                     {job.description && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Description</h4>
-                        <p className="sec-body">{stripMd(job.description)}</p>
+                        <p className="sec-body pre">{stripMd(job.description)}</p>
                       </div>
                     )}
                     {(job.skills || []).length > 0 && (

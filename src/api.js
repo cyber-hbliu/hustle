@@ -136,38 +136,46 @@ function stripMd(text = '') {
     .trim();
 }
 
-// Extract the role-specific description paragraph (skip company boilerplate)
+// Extract the role overview — keeps structure, skips company boilerplate
 function extractDescription(content) {
-  // Look for "About the Role / Position Overview / Job Summary" section
+  // Look for explicit "About the Role / Position Overview" section
   const roleM = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:about\s+the\s+(?:role|position|opportunity|job)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(?:role|position)|department\s+overview)\*{0,2}\s*\n+([\s\S]{80,1000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z]|\n---)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:about\s+the\s+(?:role|position|opportunity|job|team)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(?:role|position)|department\s+overview|mission\s+or\s+department)\*{0,2}\s*\n+([\s\S]{80,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]{0,60}\*{2}\s*\n|\n---)/im
   );
-  if (roleM) return stripMd(roleM[1]).slice(0, 600).trim();
 
-  // Fallback: skip leading boilerplate paragraphs (mission statements, etc.)
-  // and return text starting from the first sentence about the specific role
-  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-  const roleIdx = lines.findIndex(l =>
-    /(?:we are looking for|we.re looking for|you will|this role|join(?:ing)? (?:our|the)|as (?:a |an |the )\w+ analyst|as (?:a |an |the )\w+ engineer|as (?:a |an |the )\w+ manager|senior analyst|senior engineer|staff \w+)/i.test(l)
-  );
-  const startIdx = roleIdx >= 0 && roleIdx < 10 ? roleIdx : 0;
-  return stripMd(lines.slice(startIdx, startIdx + 6).join(' ')).slice(0, 600).trim();
+  const raw = roleM ? roleM[1] : (() => {
+    // Fallback: skip boilerplate by finding first sentence clearly about this role
+    const lines = content.split('\n').filter(l => l.trim().length > 40);
+    const idx = lines.findIndex(l =>
+      /(?:we(?:'re| are) looking for|you will|this role|join(?:ing)? (?:our|the)|is looking for|seeks? a|will (?:work|report|own|build|lead|support|collaborate))/i.test(l)
+    );
+    return lines.slice(Math.max(0, idx), Math.max(0, idx) + 12).join('\n');
+  })();
+
+  // Keep paragraphs and any inline bullet lists — strip only markdown syntax
+  const cleaned = stripMd(raw);
+  // Collect meaningful paragraphs (drop nav/breadcrumb fragments under 40 chars)
+  const paras = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 40);
+  return paras.slice(0, 5).join('\n\n').slice(0, 1400).trim();
 }
 
-// Extract a duties/responsibilities section from markdown job content
+// Extract duties/responsibilities as structured bullet points
 function extractDuties(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we.{0,10}looking for|the role|essential functions|your (?:day|work|responsibilities))\*{0,2}\s*:?\s*\n([\s\S]{30,800}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n\n)/im
   );
   if (!m) return '';
   const raw = m[1];
-  // Prefer explicit bullet lists
   const bullets = raw.match(/(?:[-•*▪◦✓]|\d+\.)\s+[^\n]{10,}/g) || [];
   if (bullets.length >= 2) {
-    return bullets.slice(0, 7).map(b => '• ' + b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim()).join('\n').slice(0, 600);
+    return bullets
+      .slice(0, 10)
+      .map(b => '• ' + stripMd(b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim()))
+      .join('\n')
+      .slice(0, 1200);
   }
-  // Fallback: plain sentences, take first 4
-  return stripMd(raw).split(/\n+/).filter(l => l.length > 20).slice(0, 4).join('\n').slice(0, 500);
+  // Fallback: plain sentences
+  return stripMd(raw).split(/\n+/).filter(l => l.length > 25).slice(0, 8).join('\n').slice(0, 900);
 }
 
 // Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
@@ -544,20 +552,20 @@ async function parseJobWithAI(jinaText, url) {
     : jinaText;
 
   const data = await callClaude({
-    maxTokens: 700,
+    maxTokens: 1000,
     messages: [{
       role: 'user',
-      content: `Extract structured information from this job posting. Be precise and concise.
+      content: `Extract structured information from this job posting. Preserve enough detail to help a job seeker quickly understand the role — do not flatten or over-summarize.
 
 Return ONLY valid JSON — no extra text:
 {
   "position": "exact job title only, no company or location appended",
   "company": "company or organization name",
-  "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if not found.",
+  "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
-  "description": "2-3 sentences only: what this team does and what this specific role will own/build/analyze — skip company mission statements and boilerplate",
-  "skills": ["up to 10 specific tools, languages, or methods explicitly named in the qualifications or requirements section — extract the actual keywords used in the JD, no single letters, no generic verbs"],
-  "duties": "4-6 key responsibilities, one per line, each starting with '• '",
+  "description": "structured overview of the role — 3-6 bullet points using '• ', covering: what the team/org does, what this role owns, key goals, reporting structure if mentioned. Skip generic company mission boilerplate.",
+  "skills": ["up to 12 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD, no single letters, no generic verbs like 'communicate'"],
+  "duties": "the key responsibilities as bullet points, one per line starting with '• '. Include all meaningful items from the Responsibilities section — aim for 6-10 bullets.",
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
 
@@ -565,7 +573,7 @@ Page title: ${rawTitle}
 URL: ${url}
 
 Job content:
-${content.slice(0, 3500)}`,
+${content.slice(0, 4000)}`,
     }],
   });
 
