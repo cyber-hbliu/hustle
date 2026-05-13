@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { parseJobUrl, analyzeMatch, generateCoverLetter, getApiKey, setApiKey } from './api';
+import { parseJobUrl, analyzeMatch, generateCoverLetter, getApiKey, setApiKey, extractSkills } from './api';
 
 // ─── Constants ─────────────────────────────────────────────────────────
 const STATUSES = [
@@ -97,7 +97,13 @@ const save = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
 // ─── App ───────────────────────────────────────────────────────────────
 export default function App() {
-  const [jobs, setJobs]             = useState(() => load('hs-jobs', []));
+  const [jobs, setJobs]             = useState(() => {
+    const stored = load('hs-jobs', []);
+    // Re-extract skills from stored description to clean up false positives
+    return stored.map(j =>
+      j.description ? { ...j, skills: extractSkills(j.description) } : j
+    );
+  });
   const [activeTab, setActiveTab]   = useState('saved');
   const [urlInput, setUrlInput]     = useState('');
   const [parsing, setParsing]       = useState(false);
@@ -113,6 +119,13 @@ export default function App() {
   );
 
   const hasApiKey = !!apiKeyVal.trim();
+
+  const stripMd = (text = '') => text
+    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .trim();
 
   // CL state
   const [analysis, setAnalysis]     = useState(null);
@@ -158,7 +171,7 @@ export default function App() {
   const handleParse = async () => {
     const url = urlInput.trim();
     if (!url) return;
-    setParsing(true); setError(''); setParseMsg('Reading page…');
+    setParsing(true); setError(''); setParseMsg(hasApiKey ? 'Reading & analyzing…' : 'Reading page…');
     try {
       const p = await parseJobUrl(url);
       const job = {
@@ -175,6 +188,7 @@ export default function App() {
         skills: Array.isArray(p.skills) ? p.skills : [],
         qualifications: p.qualifications || '',
         description: p.description || '',
+        duties: p.duties || '',
         worker_protections: p.worker_protections || '',
         community_focus: p.community_focus || '',
         status: 'saved',
@@ -521,13 +535,27 @@ export default function App() {
                     {job.description && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Description</h4>
-                        <p className="sec-body">{job.description}</p>
+                        <p className="sec-body">{stripMd(job.description)}</p>
                       </div>
                     )}
-                    {job.qualifications && (
+                    {(job.skills || []).length > 0 && (
+                      <div className="d-section wide">
+                        <h4 className="sec-title">Core Skills</h4>
+                        <div className="d-skills">
+                          {job.skills.map((s, i) => <span key={i} className="skill-chip">{s}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {job.duties && (
+                      <div className="d-section wide">
+                        <h4 className="sec-title">Major Duties</h4>
+                        <p className="sec-body pre">{job.duties}</p>
+                      </div>
+                    )}
+                    {job.deadline && (
                       <div className="d-section">
-                        <h4 className="sec-title">Qualifications</h4>
-                        <p className="sec-body">{job.qualifications}</p>
+                        <h4 className="sec-title">Deadline</h4>
+                        <p className="sec-body">{job.deadline}</p>
                       </div>
                     )}
                     {job.benefits && (
@@ -536,36 +564,6 @@ export default function App() {
                         <p className="sec-body">{job.benefits}</p>
                       </div>
                     )}
-                    {job.worker_protections && (
-                      <div className="d-section">
-                        <h4 className="sec-title">Worker Protections</h4>
-                        <p className="sec-body">{job.worker_protections}</p>
-                      </div>
-                    )}
-                    {job.community_focus && (
-                      <div className="d-section">
-                        <h4 className="sec-title">Community Focus</h4>
-                        <p className="sec-body">{job.community_focus}</p>
-                      </div>
-                    )}
-                    {(job.skills || []).length > 0 && (
-                      <div className="d-section">
-                        <h4 className="sec-title">Skills</h4>
-                        <div className="d-skills">
-                          {job.skills.map((s, i) => <span key={i} className="skill-chip">{s}</span>)}
-                        </div>
-                      </div>
-                    )}
-                    <div className="d-section wide">
-                      <h4 className="sec-title">Notes</h4>
-                      <textarea
-                        className="notes-ta"
-                        placeholder="Interview prep, contacts, follow-ups…"
-                        value={job.notes || ''}
-                        onChange={e => updateJob(job.id, { notes: e.target.value })}
-                        rows={2}
-                      />
-                    </div>
                   </div>
 
                   {/* ── Cover Letter Generator ── */}

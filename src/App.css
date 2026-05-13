@@ -429,6 +429,7 @@ body {
   margin-bottom: 5px;
 }
 .sec-body { font-size: 13px; color: #374151; line-height: 1.55; }
+.sec-body.pre { white-space: pre-wrap; }
 
 .d-skills { display: flex; flex-wrap: wrap; gap: 5px; }
 .skill-chip {

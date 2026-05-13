@@ -55,16 +55,96 @@ async function fetchPage(url) {
   }
 }
 
+// Known job board / site names to filter from pipe-separated page titles
+const JOB_BOARD_NAMES = new Set([
+  'indeed', 'linkedin', 'glassdoor', 'ziprecruiter', 'monster', 'careerbuilder',
+  'simplyhired', 'dice', 'usajobs', 'idealist', 'handshake', 'lever', 'greenhouse',
+  'workday', 'smartrecruiters', 'ashby', 'jobs', 'careers', 'job listings',
+  'open positions', 'apply now', 'join us', 'work with us', 'employment',
+]);
+
+// Split a raw HTML page title into { position, location, company }
+function parsePageTitle(rawTitle, atsCompany) {
+  if (!rawTitle) return { position: '', location: '', company: atsCompany || '' };
+  const title = rawTitle.trim();
+  const pipeParts = title.split(/\s*\|\s*/);
+
+  let position = '';
+  let company = atsCompany || '';
+  let location = '';
+
+  if (pipeParts.length >= 2) {
+    const valid = pipeParts.filter(p => !JOB_BOARD_NAMES.has(p.toLowerCase().trim()) && p.trim());
+    const first = valid[0]?.trim() || '';
+    const last = valid[valid.length - 1]?.trim() || '';
+
+    if (valid.length >= 2) {
+      if (!atsCompany) company = last;
+      // "Title in City, State" → split off location
+      const locM = first.match(/\s+in\s+([A-Z][a-zA-Z][a-zA-Z .]*,\s*[A-Z][a-zA-Z]{1,20})\s*$/);
+      if (locM) {
+        location = locM[1].trim();
+        position = first.slice(0, locM.index).trim();
+      } else {
+        position = first;
+      }
+    } else {
+      // Only one non-board segment — try "Title at Company"
+      const atM = first.match(/^(.+?)\s+at\s+(.+)$/i);
+      if (atM) {
+        position = atM[1].trim();
+        if (!atsCompany) company = atM[2].trim();
+      } else {
+        position = first;
+      }
+    }
+  } else {
+    // No pipe — try "Title - Company" on last dash, then "Title at Company"
+    const dashIdx = title.lastIndexOf(' - ');
+    if (dashIdx > 0) {
+      const after = title.slice(dashIdx + 3).trim();
+      if (after.length < 60 && !atsCompany) {
+        position = title.slice(0, dashIdx).trim();
+        company = after;
+      } else {
+        position = title;
+      }
+    } else {
+      const atM = title.match(/^(.+?)\s+at\s+(.+)$/i);
+      if (atM) {
+        position = atM[1].trim();
+        if (!atsCompany) company = atM[2].trim();
+      } else {
+        position = title;
+      }
+    }
+  }
+
+  position = position.replace(/\s*[-–—]+\s*$/, '').trim();
+  return { position, location, company };
+}
+
+// Extract a duties/responsibilities section from markdown job content
+function extractDuties(content) {
+  const m = content.match(
+    /(?:^|\n)#{0,3}\s*(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|the role|essential functions)\s*:?\s*\n([\s\S]{30,600}?)(?=\n#{1,3}\s|\n\n[A-Z][^\n]*:\s*\n|\n---|\n\n\n)/im
+  );
+  if (!m) return '';
+  const bullets = m[1].match(/[-•*▪◦✓]\s*[^\n]+/g) || [];
+  if (bullets.length) return bullets.slice(0, 7).join('\n').trim().slice(0, 500);
+  return m[1].replace(/\n{3,}/g, '\n\n').trim().slice(0, 400);
+}
+
 // Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
 function parseFromText(text, url) {
   const titleMatch = text.match(/^Title:\s*(.+)$/m);
-  const title = titleMatch ? titleMatch[1].trim() : '';
+  const rawTitle = titleMatch ? titleMatch[1].trim() : '';
 
   const contentIdx = text.indexOf('Markdown Content:');
   const content = contentIdx >= 0 ? text.slice(contentIdx + 'Markdown Content:'.length).trim() : text;
 
-  // Extract company from known ATS URL patterns
-  let company = '';
+  // Extract company from known ATS URL patterns (used as authoritative hint)
+  let atsCompany = '';
   try {
     const u = new URL(url);
     const host = u.hostname;
@@ -73,29 +153,56 @@ function parseFromText(text, url) {
     const wd = host.match(/^([^.]+)\.wd\d+\.myworkdayjobs\.com$/);
     const ash = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
     const smart = url.match(/boards\.smartrecruiters\.com\/([^/?#]+)/);
-    if (gh) company = gh[1].replace(/-/g, ' ');
-    else if (lv) company = lv[1].replace(/-/g, ' ');
-    else if (wd) company = wd[1].replace(/-/g, ' ');
-    else if (ash) company = ash[1].replace(/-/g, ' ');
-    else if (smart) company = smart[1].replace(/-/g, ' ');
-    else company = host.replace(/^www\./, '').split('.')[0];
+    if (gh) atsCompany = gh[1].replace(/-/g, ' ');
+    else if (lv) atsCompany = lv[1].replace(/-/g, ' ');
+    else if (wd) atsCompany = wd[1].replace(/-/g, ' ');
+    else if (ash) atsCompany = ash[1].replace(/-/g, ' ');
+    else if (smart) atsCompany = smart[1].replace(/-/g, ' ');
   } catch {}
 
-  // Try to pull a cleaner location from the content
-  const locMatch = content.match(
-    /(?:^|\n)\s*(?:Location|Based in|Office|Where you.{0,10}work)[:\s–-]+([^\n]{5,60})/im
-  ) || content.match(/\b(Remote|Hybrid|On[\s-]?site)[,\s–-]*([A-Z][a-zA-Z\s]+,\s*[A-Z]{2})/);
-  const location = locMatch ? locMatch[1]?.trim().replace(/\*+/g, '') || locMatch[0].trim() : '';
+  const parsed = parsePageTitle(rawTitle, atsCompany);
 
-  const desc = content.slice(0, 1400).trim();
+  // Fall back to domain name if no company extracted from title or ATS
+  let company = parsed.company;
+  if (!company) {
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, '').split('.')[0];
+      company = host.charAt(0).toUpperCase() + host.slice(1);
+    } catch {}
+  }
+
+  // Try to pull location from content if title parsing didn't find one
+  let location = parsed.location;
+  if (!location) {
+    const locMatch = content.match(
+      /(?:^|\n)\s*(?:Location|Based in|Office|Where you.{0,10}work)[:\s–-]+([^\n]{5,60})/im
+    ) || content.match(/\b(Remote|Hybrid|On[\s-]?site)[,\s–-]*([A-Z][a-zA-Z\s]+,\s*[A-Z]{2})/);
+    location = locMatch ? locMatch[1]?.trim().replace(/\*+/g, '') || locMatch[0].trim() : '';
+  }
+
+  // Find role-specific description section; skip company mission boilerplate
+  const roleStart = content.search(
+    /(?:^|\n)#{0,3}\s*(?:about\s+the\s+(role|position|opportunity|team)|the\s+role|role\s+overview|position\s+overview|job\s+summary|about\s+this\s+(role|position))\s*\n/im
+  );
+  const descRaw = roleStart > 0 && roleStart < 1200
+    ? content.slice(roleStart, roleStart + 900)
+    : content.slice(0, 900);
+  const desc = descRaw
+    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 700);
 
   return {
-    position: title,
-    company: company.charAt(0).toUpperCase() + company.slice(1),
+    position: parsed.position || rawTitle,
+    company,
     location: location.slice(0, 80),
     salary: parseSalary(content),
     benefits: '',
     description: desc,
+    duties: extractDuties(content),
     qualifications: '',
     deadline: '',
     skills: extractSkills(content),
@@ -111,8 +218,8 @@ function cleanText(str = '') {
 }
 
 const SKILL_KEYWORDS = [
-  'python', 'r', 'sql', 'excel', 'tableau', 'power bi', 'javascript', 'typescript',
-  'react', 'node.js', 'java', 'c++', 'c#', 'go', 'rust', 'scala', 'spark', 'hadoop',
+  'python', 'r programming', 'sql', 'excel', 'tableau', 'power bi', 'javascript', 'typescript',
+  'react', 'node.js', 'java', 'c++', 'c#', 'golang', 'rust', 'scala', 'spark', 'hadoop',
   'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'linux', 'bash', 'terraform',
   'machine learning', 'deep learning', 'nlp', 'tensorflow', 'pytorch', 'scikit-learn',
   'data analysis', 'data visualization', 'statistics', 'econometrics', 'gis', 'arcgis', 'qgis',
@@ -123,9 +230,12 @@ const SKILL_KEYWORDS = [
   'budget management', 'fundraising', 'communications', 'content writing',
 ];
 
-function extractSkills(text) {
+export function extractSkills(text) {
   const lower = text.toLowerCase();
-  return [...new Set(SKILL_KEYWORDS.filter(s => lower.includes(s.toLowerCase())))].slice(0, 14);
+  return [...new Set(SKILL_KEYWORDS.filter(s => {
+    const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`).test(lower);
+  }))].slice(0, 14);
 }
 
 function detectSponsorship(text) {
@@ -209,6 +319,7 @@ function fromJsonLd(job, bodyText) {
     salary: formatSalary(job.baseSalary, bodyText),
     benefits: cleanText(job.jobBenefits || ''),
     description: rawDesc,
+    duties: '',
     qualifications: cleanText(job.qualifications || job.experienceRequirements || '').slice(0, 600),
     deadline: (job.validThrough || '').split('T')[0] || '',
     skills: extractSkills(combined),
@@ -254,6 +365,7 @@ function fromHtmlFallback(doc, bodyText) {
     salary: parseSalary(bodyText),
     benefits: '',
     description: desc,
+    duties: '',
     qualifications: '',
     deadline: '',
     skills: extractSkills(bodyText),
@@ -278,6 +390,14 @@ export async function parseJobUrl(url) {
   // Primary: Jina AI Reader
   try {
     const jinaText = await fetchViaJina(url);
+    // With API key: use AI for smart summarization and extraction
+    if (getApiKey()) {
+      try {
+        return await parseJobWithAI(jinaText, url);
+      } catch (aiErr) {
+        console.warn('AI extraction failed, using heuristics:', aiErr.message);
+      }
+    }
     const result = parseFromText(jinaText, url);
     if (result.position) return result;
   } catch (jinaErr) {
@@ -344,6 +464,72 @@ function parseJSON(raw) {
     if (m) return JSON.parse(m[0]);
     throw new Error('Could not parse AI response.');
   }
+}
+
+async function parseJobWithAI(jinaText, url) {
+  const titleMatch = jinaText.match(/^Title:\s*(.+)$/m);
+  const rawTitle = titleMatch ? titleMatch[1].trim() : '';
+  const contentIdx = jinaText.indexOf('Markdown Content:');
+  const content = contentIdx >= 0
+    ? jinaText.slice(contentIdx + 'Markdown Content:'.length).trim()
+    : jinaText;
+
+  const data = await callClaude({
+    maxTokens: 700,
+    messages: [{
+      role: 'user',
+      content: `Extract structured information from this job posting. Be precise and concise.
+
+Return ONLY valid JSON — no extra text:
+{
+  "position": "exact job title only, no company or location appended",
+  "company": "company or organization name",
+  "location": "City, ST  or  Remote  or  Hybrid, City, ST",
+  "salary": "salary range as written in the posting, or ''",
+  "description": "2-3 sentences only: what this team does and what this specific role will own/build/analyze — skip company mission statements and boilerplate",
+  "skills": ["up to 10 technical or domain skills explicitly required — no single letters, no generic verbs, real tool/language/method names only"],
+  "duties": "4-6 key responsibilities, one per line, each starting with '• '",
+  "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
+}
+
+Page title: ${rawTitle}
+URL: ${url}
+
+Job content:
+${content.slice(0, 3500)}`,
+    }],
+  });
+
+  const r = parseJSON(extractText(data));
+
+  // Determine ATS company as fallback hint
+  let atsCompany = '';
+  try {
+    const u = new URL(url);
+    const gh = url.match(/boards\.greenhouse\.io\/([^/?#]+)/);
+    const lv = url.match(/jobs\.lever\.co\/([^/?#]+)/);
+    const wd = u.hostname.match(/^([^.]+)\.wd\d+\.myworkdayjobs\.com$/);
+    if (gh) atsCompany = gh[1].replace(/-/g, ' ');
+    else if (lv) atsCompany = lv[1].replace(/-/g, ' ');
+    else if (wd) atsCompany = wd[1].replace(/-/g, ' ');
+  } catch {}
+
+  return {
+    position: r.position || parsePageTitle(rawTitle, atsCompany).position,
+    company: r.company || parsePageTitle(rawTitle, atsCompany).company,
+    location: r.location || '',
+    salary: r.salary || parseSalary(content),
+    benefits: '',
+    description: r.description || '',
+    duties: r.duties || '',
+    qualifications: '',
+    deadline: r.deadline || '',
+    skills: Array.isArray(r.skills) ? r.skills.slice(0, 10) : extractSkills(content),
+    sponsorship: detectSponsorship(content),
+    union: detectUnion(content),
+    worker_protections: extractWorkerProtections(content),
+    community_focus: detectCommunityFocus(content),
+  };
 }
 
 export async function analyzeMatch(job, resumeText) {
