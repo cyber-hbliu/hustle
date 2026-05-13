@@ -80,8 +80,9 @@ function parsePageTitle(rawTitle, atsCompany) {
 
     if (valid.length >= 2) {
       if (!atsCompany) company = last;
-      // "Title in City, State" → split off location
-      const locM = first.match(/\s+in\s+([A-Z][a-zA-Z][a-zA-Z .]*,\s*[A-Z][a-zA-Z]{1,20})\s*$/);
+      // "Title in City, State" or "Title - Remote" → split off location
+      const locM = first.match(/\s+in\s+([A-Za-z][a-zA-Z .]{2,},\s*[A-Za-z]{2,20})\s*$/)
+        || first.match(/\s*[-–]\s*(Remote|Hybrid|On[\s-]?[Ss]ite)\s*$/i);
       if (locM) {
         location = locM[1].trim();
         position = first.slice(0, locM.index).trim();
@@ -205,14 +206,8 @@ function parseFromText(text, url) {
     } catch {}
   }
 
-  // Try to pull location from content if title parsing didn't find one
-  let location = parsed.location;
-  if (!location) {
-    const locMatch = content.match(
-      /(?:^|\n)\s*(?:Location|Based in|Office|Where you.{0,10}work)[:\s–-]+([^\n]{5,60})/im
-    ) || content.match(/\b(Remote|Hybrid|On[\s-]?site)[,\s–-]*([A-Z][a-zA-Z\s]+,\s*[A-Z]{2})/);
-    location = locMatch ? locMatch[1]?.trim().replace(/\*+/g, '') || locMatch[0].trim() : '';
-  }
+  // Title parsing covers "Title in City, ST" format; content scan covers everything else
+  const location = parsed.location || extractLocation(content);
 
   const desc = extractDescription(content);
 
@@ -263,12 +258,53 @@ const SKILL_KEYWORDS = [
   'budget management', 'fundraising', 'communications', 'content writing',
 ];
 
-export function extractSkills(text) {
-  const lower = text.toLowerCase();
+// Find the qualifications / requirements / skills section so we only
+// match skill keywords where they're explicitly listed, not incidentally
+function extractQualSection(content) {
+  const m = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?)\*{0,2}\s*:?\s*\n([\s\S]{50,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,60}:\s*\n)/im
+  );
+  return m ? m[1] : null;
+}
+
+export function extractSkills(content) {
+  // Prefer searching within the qualifications section to avoid false positives
+  const qualSection = extractQualSection(content);
+  const lower = (qualSection || content).toLowerCase();
   return [...new Set(SKILL_KEYWORDS.filter(s => {
     const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`\\b${escaped}\\b`).test(lower);
-  }))].slice(0, 14);
+  }))].slice(0, 12);
+}
+
+// Extract location from job content — handles Remote, Hybrid, City/ST, label lines
+function extractLocation(content) {
+  // 1. Explicit "Location: ..." label
+  const byLabel = content.match(
+    /(?:^|\n)\s*\*{0,2}(?:location|work\s+location|job\s+location|office\s+location)\*{0,2}\s*[:\s–-]+([^\n*]{3,70})/im
+  );
+  if (byLabel) {
+    const loc = stripMd(byLabel[1]).trim();
+    if (loc.length > 2) return loc.slice(0, 80);
+  }
+
+  // 2. Remote / Hybrid / On-site — optionally followed by a city
+  const remoteM = content.match(
+    /\b(Remote|Hybrid|On[\s-]?[Ss]ite)\b(?:\s*[-–(\/,]\s*([A-Z][a-zA-Z\s.]{2,35}(?:,\s*[A-Z][a-zA-Z]{0,18})?))?/
+  );
+  if (remoteM) {
+    const city = remoteM[2]?.replace(/[()]/g, '').trim();
+    return (city ? `${remoteM[1]} — ${city}` : remoteM[1]).slice(0, 80);
+  }
+
+  // 3. "City, ST" pattern (search in first 3000 chars to avoid footer noise)
+  const early = content.slice(0, 3000);
+  const cityM = early.match(
+    /\b([A-Z][a-z]{2,18}(?:[\s-][A-Z][a-z]{2,15})?),\s*([A-Z]{2})\b/
+  );
+  if (cityM) return `${cityM[1]}, ${cityM[2]}`;
+
+  return '';
 }
 
 function detectSponsorship(text) {
@@ -517,10 +553,10 @@ Return ONLY valid JSON — no extra text:
 {
   "position": "exact job title only, no company or location appended",
   "company": "company or organization name",
-  "location": "City, ST  or  Remote  or  Hybrid, City, ST",
+  "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if not found.",
   "salary": "salary range as written in the posting, or ''",
   "description": "2-3 sentences only: what this team does and what this specific role will own/build/analyze — skip company mission statements and boilerplate",
-  "skills": ["up to 10 technical or domain skills explicitly required — no single letters, no generic verbs, real tool/language/method names only"],
+  "skills": ["up to 10 specific tools, languages, or methods explicitly named in the qualifications or requirements section — extract the actual keywords used in the JD, no single letters, no generic verbs"],
   "duties": "4-6 key responsibilities, one per line, each starting with '• '",
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
@@ -550,7 +586,7 @@ ${content.slice(0, 3500)}`,
   return {
     position: r.position || parsePageTitle(rawTitle, atsCompany).position,
     company: r.company || parsePageTitle(rawTitle, atsCompany).company,
-    location: r.location || '',
+    location: r.location || extractLocation(content),
     salary: r.salary || parseSalary(content),
     benefits: '',
     description: r.description || '',
