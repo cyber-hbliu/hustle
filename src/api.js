@@ -226,8 +226,17 @@ function boldReqLine(b) {
 
 // Bold the opening action verb + any tool/language names in a duty bullet
 function boldDutyLine(b) {
-  // Opening action verb (e.g. "Lead", "Build and maintain", "Analyze")
-  b = b.replace(/^([A-Z][a-zA-Z]+(?:\s+(?:and|&|or)\s+[a-z][a-zA-Z]+)?)\b/, '**$1**');
+  const PRONOUN_RE = /^((?:You|We|I|This\s+role|The\s+\w+(?:\s+\w+)?)\s+(?:will|can|should|must|are|have|may)\s+)/i;
+  if (PRONOUN_RE.test(b)) {
+    // "You will collaborate..." → "You will **collaborate**..."
+    b = b.replace(
+      /^((?:You|We|I|This\s+role|The\s+\w+(?:\s+\w+)?)\s+(?:will|can|should|must|are|have|may)\s+)([a-zA-Z]+(?:\s+(?:and|&|or)\s+[a-z][a-zA-Z]+)?)\b/i,
+      (_, prefix, verb) => `${prefix}**${verb}**`
+    );
+  } else {
+    // Direct verb: "Lead X", "Build and maintain X"
+    b = b.replace(/^([A-Z][a-zA-Z]+(?:\s+(?:and|&|or)\s+[a-z][a-zA-Z]+)?)\b/, '**$1**');
+  }
   return applyToolBold(b);
 }
 
