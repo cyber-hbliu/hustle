@@ -20,75 +20,6 @@ const PANELS = [
 const panelMap = Object.fromEntries(PANELS.map(p => [p.key, p]));
 
 // ─── Sample Data ───────────────────────────────────────────────────────
-const SAMPLE_JOBS = [
-  {
-    id: 'sample-1',
-    position: 'Community Data Analyst',
-    company: 'Philadelphia Workforce Development Board',
-    location: 'Philadelphia, PA',
-    salary: '$62,000 – $75,000',
-    benefits: 'Health insurance, pension, 20 days PTO',
-    sponsorship: 'Yes',
-    union: 'Yes',
-    deadline: '',
-    url: 'https://example.org/jobs/community-data-analyst',
-    skills: ['R', 'SQL', 'Data Visualization', 'Policy Research'],
-    qualifications: "Bachelor's or Master's in economics, statistics, or urban planning.",
-    description: 'Conduct applied labor market research and spatial analysis to inform workforce development policy.',
-    worker_protections: 'Equal Opportunity Employer. ADA accommodations available.',
-    community_focus: 'Serves Philadelphia workforce, focus on immigrant communities.',
-    status: 'saved',
-    coverLetter: '',
-    analysis: null,
-    notes: 'Sample — feel free to delete.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'sample-2',
-    position: 'Research Associate, Immigration Policy',
-    company: 'Urban Institute',
-    location: 'Washington, DC (Hybrid)',
-    salary: '$70,000 – $85,000',
-    benefits: 'Comprehensive health, 401k match',
-    sponsorship: 'Yes',
-    union: 'No',
-    deadline: new Date(Date.now() + 12 * 86400000).toISOString().split('T')[0],
-    url: 'https://example.org/jobs/research-associate',
-    skills: ['Python', 'Stata', 'Policy Writing', 'Quantitative Research'],
-    qualifications: "Master's in public policy, economics, or social science.",
-    description: 'Contribute to policy research on immigrant economic integration and labor market outcomes.',
-    worker_protections: 'EEO/AA Employer.',
-    community_focus: 'Research informs policy affecting low-income and immigrant communities.',
-    status: 'applied',
-    coverLetter: '',
-    analysis: null,
-    notes: 'Sample — applied 4/15.',
-    createdAt: new Date(Date.now() - 9 * 86400000).toISOString(),
-  },
-  {
-    id: 'sample-3',
-    position: 'GIS Data Specialist',
-    company: 'City of Philadelphia',
-    location: 'Philadelphia, PA',
-    salary: '$58,000 – $68,000',
-    benefits: 'City pension, health, transit subsidy',
-    sponsorship: 'No',
-    union: 'Yes',
-    deadline: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
-    url: 'https://example.org/jobs/gis-specialist',
-    skills: ['ArcGIS', 'QGIS', 'Python', 'SQL'],
-    qualifications: "2+ years GIS experience.",
-    description: 'Manage and analyze geospatial datasets to support city planning and operations.',
-    worker_protections: 'Equal Opportunity. Fair chance hiring.',
-    community_focus: 'Public sector serving all Philadelphia residents.',
-    status: 'interview',
-    coverLetter: '',
-    analysis: null,
-    notes: 'Sample — interview scheduled.',
-    createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-  },
-];
-
 // ─── Persistence ───────────────────────────────────────────────────────
 const load = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
@@ -332,10 +263,6 @@ export default function App() {
   };
 
   // ── Helpers ──
-  const loadSamples = () => {
-    setJobs(prev => [...SAMPLE_JOBS, ...prev]);
-    showToast('Sample positions loaded!');
-  };
   const dismissWelcome = () => {
     setDismissedWelcome(true);
     localStorage.setItem('hs-welcome-dismissed', '1');
@@ -406,10 +333,7 @@ export default function App() {
             sponsorship. Add a <strong>Claude API key</strong> in Settings to unlock AI cover letters.
           </p>
           <div className="wb-actions">
-            <button className="wb-btn" onClick={() => { loadSamples(); dismissWelcome(); }}>
-              Load samples
-            </button>
-            <button className="wb-btn outline" onClick={dismissWelcome}>Dismiss</button>
+            <button className="wb-btn outline" onClick={dismissWelcome}>Got it</button>
           </div>
         </div>
       )}
@@ -508,21 +432,20 @@ export default function App() {
             {activeTab === 'saved' ? '🔖' : activeTab === 'applied' ? '📤' : activeTab === 'interview' ? '💬' : '🏆'}
           </div>
           <p className="empty-title">
-            {activeTab === 'saved' ? 'No saved positions yet'
-              : activeTab === 'applied' ? 'No applications yet'
+            {activeTab === 'saved' ? 'Make the first move'
+              : activeTab === 'applied' ? 'Nothing sent yet'
               : activeTab === 'interview' ? 'No interviews yet'
-              : 'No results yet'}
+              : 'Still in the game'}
           </p>
           <p className="empty-sub">
             {activeTab === 'saved'
-              ? 'Paste a job URL above, or use the + button'
-              : 'Jobs appear here as you update their status'}
+              ? 'Drop a job URL above — your next opportunity is one paste away'
+              : activeTab === 'applied'
+              ? 'Mark a saved job as Applied when you send it out'
+              : activeTab === 'interview'
+              ? 'Update a job\'s status when you land an interview'
+              : 'Update a job\'s status once you hear back'}
           </p>
-          {jobs.length === 0 && activeTab === 'saved' && (
-            <button className="sample-btn" style={{ marginTop: 16 }} onClick={loadSamples}>
-              Load sample positions
-            </button>
-          )}
         </div>
       )}
 
