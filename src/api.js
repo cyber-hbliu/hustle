@@ -213,10 +213,10 @@ function extractRequirements(content) {
 
   const stopRE = new RegExp(SECTION_STOP.slice(4, -1)); // strip (?= and ) for use in match
   const reqM = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:required\s+qualifications?|minimum\s+qualifications?|basic\s+qualifications?)\*{0,2}\s*:?\s*\n([\s\S]{30,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:required\s+qualifications?|minimum\s+qualifications?|basic\s+qualifications?)\*{0,2}\s*:?\s*\n([\s\S]{30,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   const prefM = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:preferred\s+qualifications?|desired\s+qualifications?|nice[\s-]+to[\s-]+have)\*{0,2}\s*:?\s*\n([\s\S]{20,1500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:preferred\s+qualifications?|desired\s+qualifications?|nice[\s-]+to[\s-]+have)\*{0,2}\s*:?\s*\n([\s\S]{20,1500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
 
   const reqItems = toItems(reqM?.[1]);
@@ -237,7 +237,7 @@ function extractRequirements(content) {
 
   // Fallback: generic qualifications section
   const fallbackM = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|experience\s+(?:and\s+)?skills?)\*{0,2}\s*:?\s*\n([\s\S]{50,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|experience\s+(?:and\s+)?skills?)\*{0,2}\s*:?\s*\n([\s\S]{50,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   if (!fallbackM) return '';
   const items = toItems(fallbackM[1]);
@@ -247,7 +247,7 @@ function extractRequirements(content) {
 // Extract duties/responsibilities as structured bullet points
 function extractDuties(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities|position\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities|position\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n\n|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   if (!m) return '';
   const raw = m[1];
@@ -378,7 +378,7 @@ const EXACT_CASE_SKILLS = ['R'];
 // Find the qualifications / requirements / skills section for skills scoping
 function extractQualSection(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|required\s+qualifications?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?|desired\s+(?:skills?|qualifications?))\*{0,2}\s*:?\s*\n([\s\S]{50,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|required\s+qualifications?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?|desired\s+(?:skills?|qualifications?))\*{0,2}\s*:?\s*\n([\s\S]{50,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n\n|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   return m ? m[1] : null;
 }
