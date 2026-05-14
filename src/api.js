@@ -174,17 +174,21 @@ function extractDescription(content) {
       .slice(0, 900);
   }
 
-  // Prose: take first 3 sentences (up to ~550 chars)
+  // Prose: take up to 5 sentences (up to ~800 chars)
+  // Bump past generic "we're looking for X to join Y" opener if there are more specific sentences
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
   if (sentences.length >= 2) {
-    let result = '';
-    for (const s of sentences.slice(0, 4)) {
-      if ((result + s).length > 550) break;
+    const FILLER_RE = /^[\s"']*(the\s+\w+\s+is\s+(?:looking|seeking|hiring)|we(?:'re|\s+are)\s+(?:looking|seeking|hiring)|join\s+our\s+team)/i;
+    const openerGeneric = sentences.length >= 3 && FILLER_RE.test(sentences[0]);
+    const startIdx = openerGeneric ? 1 : 0;
+    let result = openerGeneric ? sentences[0] : '';
+    for (const s of sentences.slice(startIdx, startIdx + 5)) {
+      if ((result + s).length > 800) break;
       result += s;
     }
-    return result.trim() || text.slice(0, 500).trim();
+    return result.trim() || text.slice(0, 700).trim();
   }
-  return text.slice(0, 500).trim();
+  return text.slice(0, 700).trim();
 }
 
 // Shared regex stop condition for plain-text section breaks
@@ -652,7 +656,7 @@ Return ONLY valid JSON — no extra text:
   "company": "company or organization name",
   "location": "city/state or Remote or Hybrid. Empty string if not found.",
   "salary": "salary or pay range as written, or ''",
-  "description": "2-3 sentence prose overview of what the team/org does and what this role owns. No bullets.",
+  "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip boilerplate mission copy. No bullets.",
   "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
   "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience'. Aim for 5-10 bullets total.",
   "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
@@ -769,7 +773,7 @@ Return ONLY valid JSON — no extra text:
   "company": "company or organization name",
   "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
-  "description": "2-3 sentence prose overview of what the team/org does and what this role owns. Skip boilerplate company mission copy. No bullets.",
+  "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip generic company mission boilerplate. No bullets.",
   "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
   "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience', '• **Expertise in R** preferred'. Aim for 5-10 bullets total.",
   "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
