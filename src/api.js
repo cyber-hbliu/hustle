@@ -148,7 +148,6 @@ function extractDescription(content) {
 
   let raw = sectionM ? sectionM[1] : null;
 
-  // 2. Fallback: skip all nav lines, find first lines that look like job content
   if (!raw) {
     const cleanLines = content.split('\n')
       .map(l => l.trim())
@@ -158,7 +157,7 @@ function extractDescription(content) {
       /(?:we(?:'re| are) looking for|you will (?:be|work|report|own|join)|this role|the (?:position|role)\s+(?:will|is|reports?)|responsible for|is (?:seeking|looking for)|reports? (?:to|directly)|will (?:work|join|lead|support|build|own|partner))/i.test(l)
     );
     const start = roleStart >= 0 && roleStart < 15 ? roleStart : 0;
-    raw = cleanLines.slice(start, start + 6).join('\n\n');
+    raw = cleanLines.slice(start, start + 4).join(' ');
   }
 
   if (!raw || raw.length < 50) return '';
@@ -169,50 +168,86 @@ function extractDescription(content) {
   const inlineBullets = text.match(/(?:[-•*▪◦]|\d+\.)\s+[^\n]{20,}/g);
   if (inlineBullets && inlineBullets.length >= 2) {
     return inlineBullets
-      .slice(0, 6)
+      .slice(0, 5)
       .map(b => '• ' + b.replace(/^[-•*▪◦\d.]+\s*/, '').trim())
-      .join('\n')
-      .slice(0, 1000);
-  }
-
-  // Prose: return clean paragraphs — do NOT force-convert paragraphs into bullets
-  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 30);
-  return paras.slice(0, 3).join('\n\n').slice(0, 800).trim();
-}
-
-// Extract qualifications/requirements as a bullet list
-function extractRequirements(content) {
-  const qualSection = extractQualSection(content);
-  if (!qualSection) return '';
-
-  const text = stripMd(qualSection);
-
-  const bullets = text.match(/(?:[-•*▪◦✓]|\d+\.)\s+[^\n]{10,}/g) || [];
-  if (bullets.length >= 2) {
-    return bullets
-      .slice(0, 10)
-      .map(b => '• ' + b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim())
-      .join('\n')
-      .slice(0, 1200);
-  }
-
-  // Fallback: treat each non-trivial line as a requirement
-  const lines = text.split(/\n+/).filter(l => l.trim().length > 20 && !NAV_RE.test(l));
-  if (lines.length >= 2) {
-    return lines
-      .slice(0, 8)
-      .map(l => '• ' + l.trim().replace(/^[•\-]\s*/, ''))
       .join('\n')
       .slice(0, 900);
   }
 
-  return '';
+  // Prose: take first 3 sentences (up to ~550 chars)
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+  if (sentences.length >= 2) {
+    let result = '';
+    for (const s of sentences.slice(0, 4)) {
+      if ((result + s).length > 550) break;
+      result += s;
+    }
+    return result.trim() || text.slice(0, 500).trim();
+  }
+  return text.slice(0, 500).trim();
+}
+
+// Shared regex stop condition for plain-text section breaks
+const SECTION_STOP = `(?=\\n#{1,3}\\s|\\n\\*{2}[A-Z][^\\n]*\\*{2}|\\n---|\\n\\n[A-Z][^\\n]{0,70}:\\s*\\n)`;
+
+// Bold degree/experience markers within a requirement bullet
+function boldReqLine(b) {
+  // Degree level
+  b = b.replace(/((?:Master|Bachelor|PhD|Doctoral|Graduate|Associate)'?s?\s+degree\b[^,;]*)/, '**$1**');
+  // Experience duration: "at least N year(s)", "N+ years", "X to Y years"
+  b = b.replace(/\b((?:at\s+least\s+)?(?:\d+\+?(?:\s*(?:–|-|to)\s*\d+)?)\s+years?\s+(?:of\s+)?(?:relevant\s+|related\s+)?(?:work\s+)?experience)/i, '**$1**');
+  // "Advanced knowledge", "Expertise in", "Proficiency in", "Demonstrated" openers
+  b = b.replace(/^((?:Advanced|Expert(?:ise)?|Proficien[ct]\w*|Strong|Demonstrated|Proven|Excellent)\s+(?:knowledge|experience|ability|command|understanding|skill)\b[^,]*)/i, '**$1**');
+  return b;
+}
+
+// Extract qualifications/requirements with Required/Preferred distinction
+function extractRequirements(content) {
+  function toItems(raw) {
+    if (!raw) return [];
+    const text = stripMd(raw);
+    const bullets = text.match(/(?:[-•*▪◦✓]|\d+\.)\s+[^\n]{8,}/g) || [];
+    if (bullets.length >= 1) return bullets.slice(0, 9).map(b => b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim());
+    return text.split(/\n+/).filter(l => l.trim().length > 15 && !NAV_RE.test(l)).slice(0, 7).map(l => l.trim().replace(/^[•\-]\s*/, ''));
+  }
+
+  const stopRE = new RegExp(SECTION_STOP.slice(4, -1)); // strip (?= and ) for use in match
+  const reqM = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:required\s+qualifications?|minimum\s+qualifications?|basic\s+qualifications?)\*{0,2}\s*:?\s*\n([\s\S]{30,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+  );
+  const prefM = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:preferred\s+qualifications?|desired\s+qualifications?|nice[\s-]+to[\s-]+have)\*{0,2}\s*:?\s*\n([\s\S]{20,1500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+  );
+
+  const reqItems = toItems(reqM?.[1]);
+  const prefItems = toItems(prefM?.[1]);
+
+  if (reqItems.length > 0 || prefItems.length > 0) {
+    const lines = [];
+    if (reqItems.length > 0) {
+      if (prefItems.length > 0) lines.push('**Required:**');
+      reqItems.forEach(b => lines.push('• ' + boldReqLine(b)));
+    }
+    if (prefItems.length > 0) {
+      if (reqItems.length > 0) lines.push('**Preferred:**');
+      prefItems.forEach(b => lines.push('• ' + b));
+    }
+    return lines.join('\n').slice(0, 1500);
+  }
+
+  // Fallback: generic qualifications section
+  const fallbackM = content.match(
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|experience\s+(?:and\s+)?skills?)\*{0,2}\s*:?\s*\n([\s\S]{50,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
+  );
+  if (!fallbackM) return '';
+  const items = toItems(fallbackM[1]);
+  return items.map(b => '• ' + boldReqLine(b)).join('\n').slice(0, 1200);
 }
 
 // Extract duties/responsibilities as structured bullet points
 function extractDuties(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities|position\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:key\s+)?(?:responsibilities|duties|what you(?:'ll| will) do|what we(?:'re| are) looking for|the role|essential functions|your (?:day|work|responsibilities)|primary\s+responsibilities|position\s+responsibilities)\*{0,2}\s*:?\s*\n([\s\S]{30,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}\s*\n|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   if (!m) return '';
   const raw = m[1];
@@ -224,7 +259,6 @@ function extractDuties(content) {
       .join('\n')
       .slice(0, 1200);
   }
-  // Fallback: convert sentences to bullets
   const lines = stripMd(raw).split(/\n+/).filter(l => l.trim().length > 25 && !NAV_RE.test(l));
   return lines.slice(0, 8).map(l => '• ' + l.trim().replace(/^[•\-]\s*/, '')).join('\n').slice(0, 900);
 }
@@ -324,7 +358,8 @@ const SKILL_KEYWORDS = [
   // Analytics & ML
   'machine learning', 'deep learning', 'nlp', 'tensorflow', 'pytorch', 'scikit-learn',
   'data analysis', 'statistical analysis', 'statistics', 'econometrics',
-  'quantitative research', 'qualitative research',
+  'quantitative research', 'qualitative research', 'quantitative analysis',
+  'research methods', 'visualization',
   // Spatial
   'gis', 'arcgis', 'qgis',
   // Statistical Tools
@@ -340,46 +375,41 @@ const SKILL_KEYWORDS = [
 // e.g. "R" matches "Python, R, SQL" but not "our", "for", "work"
 const EXACT_CASE_SKILLS = ['R'];
 
-// Find the qualifications / requirements / skills section so we only
-// match keywords where they're explicitly listed, not mentioned incidentally
+// Find the qualifications / requirements / skills section for skills scoping
 function extractQualSection(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?|desired\s+(?:skills?|qualifications?))\*{0,2}\s*:?\s*\n([\s\S]{50,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,60}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|required\s+qualifications?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?|desired\s+(?:skills?|qualifications?))\*{0,2}\s*:?\s*\n([\s\S]{50,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,70}:\s*\n)/im
   );
   return m ? m[1] : null;
 }
 
 export function extractSkills(content) {
-  const qualSection = extractQualSection(content);
-  const searchIn = qualSection || content;
-  const lower = searchIn.toLowerCase();
+  // Search full content — word-boundary regex prevents false positives
+  const lower = content.toLowerCase();
 
   const found = new Set(SKILL_KEYWORDS.filter(s => {
     const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${escaped}\\b`).test(lower);
+    // Also match with optional trailing 's' (e.g. "data visualizations" → "data visualization")
+    return new RegExp(`\\b${escaped}s?\\b`).test(lower);
   }));
 
   // Case-sensitive pass for short/ambiguous names like "R"
   EXACT_CASE_SKILLS.forEach(s => {
-    if (new RegExp(`\\b${s}\\b`).test(searchIn)) found.add(s);
+    if (new RegExp(`\\b${s}\\b`).test(content)) found.add(s);
   });
 
-  // When no quals section found, supplement with contextual phrases in full content
-  // e.g. "experience with Python", "proficiency in R", "knowledge of SQL"
-  if (!qualSection && found.size < 5) {
-    const contextRE = /(?:experience\s+(?:with|in|using)|proficiency\s+in|knowledge\s+of|familiarity\s+with|expertise\s+in|skilled\s+in|background\s+in|including\s+(?:but\s+not\s+limited\s+to\s+)?)\s+([^.,;\n]{3,60})/gi;
-    let m;
-    while ((m = contextRE.exec(content)) !== null) {
-      const phrase = m[1].toLowerCase();
-      const phraseRaw = m[1];
-      SKILL_KEYWORDS.forEach(s => {
-        const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (new RegExp(`\\b${escaped}\\b`).test(phrase)) found.add(s);
-      });
-      EXACT_CASE_SKILLS.forEach(s => {
-        if (new RegExp(`\\b${s}\\b`).test(phraseRaw)) found.add(s);
-      });
-    }
+  // Contextual phrase boost — catch skills near explicit "experience with / expertise in" markers
+  const contextRE = /(?:experience\s+(?:with|in|using)|proficiency\s+in|knowledge\s+of|familiarity\s+with|expertise\s+in|skilled\s+in|including\s+(?:but\s+not\s+limited\s+to\s+)?)\s+([^.,;\n]{3,60})/gi;
+  let m;
+  while ((m = contextRE.exec(content)) !== null) {
+    const phrase = m[1].toLowerCase();
+    SKILL_KEYWORDS.forEach(s => {
+      const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`\\b${escaped}s?\\b`).test(phrase)) found.add(s);
+    });
+    EXACT_CASE_SKILLS.forEach(s => {
+      if (new RegExp(`\\b${s}\\b`).test(m[1])) found.add(s);
+    });
   }
 
   return [...found].slice(0, 14);
@@ -623,9 +653,9 @@ Return ONLY valid JSON — no extra text:
   "location": "city/state or Remote or Hybrid. Empty string if not found.",
   "salary": "salary or pay range as written, or ''",
   "description": "2-3 sentence prose overview of what the team/org does and what this role owns. No bullets.",
-  "duties": "key responsibilities as bullet points, one per line starting with '• ', aim for 6-10 bullets",
-  "requirements": "qualifications and requirements as bullet points, one per line starting with '• ', aim for 5-8 bullets",
-  "skills": ["up to 14 specific tools, technologies, methods explicitly required — use exact terms from the text, include single-letter names like 'R' when listed as a required skill"],
+  "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
+  "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience'. Aim for 5-10 bullets total.",
+  "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
 
@@ -740,9 +770,9 @@ Return ONLY valid JSON — no extra text:
   "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
   "description": "2-3 sentence prose overview of what the team/org does and what this role owns. Skip boilerplate company mission copy. No bullets.",
-  "duties": "the key responsibilities as bullet points, one per line starting with '• '. Include all meaningful items from the Responsibilities section — aim for 6-10 bullets.",
-  "requirements": "qualifications and requirements as bullet points, one per line starting with '• '. Include all meaningful items from the Qualifications/Requirements section — aim for 5-8 bullets.",
-  "skills": ["up to 14 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD (e.g. 'R', 'Python', 'BigQuery', 'dbt', 'GitHub', 'SQL', 'data visualization'). Include single-letter language names like 'R' when explicitly listed as a required tool. No generic soft-skill verbs."],
+  "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
+  "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience', '• **Expertise in R** preferred'. Aim for 5-10 bullets total.",
+  "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
 

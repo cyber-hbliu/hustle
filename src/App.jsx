@@ -19,7 +19,24 @@ const PANELS = [
 ];
 const panelMap = Object.fromEntries(PANELS.map(p => [p.key, p]));
 
-// ─── Sample Data ───────────────────────────────────────────────────────
+// ─── Render helpers ────────────────────────────────────────────────────
+// Renders text with **bold** markers as <strong> inline elements
+function renderText(str) {
+  if (!str) return null;
+  return str.split('\n').map((line, li) => {
+    const parts = line.split(/(\*\*[^*\n]+\*\*)/g);
+    return (
+      <span key={li} style={{ display: 'block' }}>
+        {parts.map((p, pi) =>
+          p.startsWith('**') && p.endsWith('**')
+            ? <strong key={pi}>{p.slice(2, -2)}</strong>
+            : p
+        )}
+      </span>
+    );
+  });
+}
+
 // ─── Persistence ───────────────────────────────────────────────────────
 const load = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
@@ -525,13 +542,13 @@ export default function App() {
                     {job.duties && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Major Duties</h4>
-                        <p className="sec-body pre">{job.duties}</p>
+                        <div className="sec-body pre">{renderText(job.duties)}</div>
                       </div>
                     )}
                     {job.qualifications && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Requirements</h4>
-                        <p className="sec-body pre">{job.qualifications}</p>
+                        <div className="sec-body pre">{renderText(job.qualifications)}</div>
                       </div>
                     )}
                     {(job.skills || []).length > 0 && (
