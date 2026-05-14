@@ -139,7 +139,7 @@ function stripMd(text = '') {
 // Lines that are clearly UI / navigation chrome, not job content
 const NAV_RE = /^(?:skip\s+to|close\b|menu\b|\bHome\b|main\s+nav(?:igation)?|back\s+to|apply\s+now|share\b|save\s+job|log\s*in|sign\s+in|\d+\s+days?\s+ago|posted\s+\d|overview\s*$|breadcrumb|cookie|privacy\s+policy|terms\s+of)/i;
 
-// Extract the role overview as bullet points — skips nav/boilerplate junk
+// Extract the role overview as readable prose — skips nav/boilerplate junk
 function extractDescription(content) {
   // 1. Try an explicit "About the Role / Position Overview" section header
   const sectionM = content.match(
@@ -158,26 +158,55 @@ function extractDescription(content) {
       /(?:we(?:'re| are) looking for|you will (?:be|work|report|own|join)|this role|the (?:position|role)\s+(?:will|is|reports?)|responsible for|is (?:seeking|looking for)|reports? (?:to|directly)|will (?:work|join|lead|support|build|own|partner))/i.test(l)
     );
     const start = roleStart >= 0 && roleStart < 15 ? roleStart : 0;
-    raw = cleanLines.slice(start, start + 12).join('\n');
+    raw = cleanLines.slice(start, start + 6).join('\n\n');
   }
 
   if (!raw || raw.length < 50) return '';
 
   const text = stripMd(raw);
 
-  // If the section already has bullet-like items, normalise them
+  // If the section already has bullet-like items, normalize them
   const inlineBullets = text.match(/(?:[-•*▪◦]|\d+\.)\s+[^\n]{20,}/g);
   if (inlineBullets && inlineBullets.length >= 2) {
     return inlineBullets
-      .slice(0, 8)
+      .slice(0, 6)
       .map(b => '• ' + b.replace(/^[-•*▪◦\d.]+\s*/, '').trim())
+      .join('\n')
+      .slice(0, 1000);
+  }
+
+  // Prose: return clean paragraphs — do NOT force-convert paragraphs into bullets
+  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 30);
+  return paras.slice(0, 3).join('\n\n').slice(0, 800).trim();
+}
+
+// Extract qualifications/requirements as a bullet list
+function extractRequirements(content) {
+  const qualSection = extractQualSection(content);
+  if (!qualSection) return '';
+
+  const text = stripMd(qualSection);
+
+  const bullets = text.match(/(?:[-•*▪◦✓]|\d+\.)\s+[^\n]{10,}/g) || [];
+  if (bullets.length >= 2) {
+    return bullets
+      .slice(0, 10)
+      .map(b => '• ' + b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim())
       .join('\n')
       .slice(0, 1200);
   }
 
-  // Convert prose into bullet points — one bullet per paragraph/sentence block
-  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 40);
-  return paras.slice(0, 6).map(p => '• ' + p.replace(/^[•\-]\s*/, '')).join('\n').slice(0, 1400).trim();
+  // Fallback: treat each non-trivial line as a requirement
+  const lines = text.split(/\n+/).filter(l => l.trim().length > 20 && !NAV_RE.test(l));
+  if (lines.length >= 2) {
+    return lines
+      .slice(0, 8)
+      .map(l => '• ' + l.trim().replace(/^[•\-]\s*/, ''))
+      .join('\n')
+      .slice(0, 900);
+  }
+
+  return '';
 }
 
 // Extract duties/responsibilities as structured bullet points
@@ -249,7 +278,7 @@ function parseFromText(text, url) {
     benefits: '',
     description: desc,
     duties: extractDuties(content),
-    qualifications: '',
+    qualifications: extractRequirements(content),
     deadline: '',
     skills: extractSkills(content),
     sponsorship: detectSponsorship(content),
@@ -259,7 +288,7 @@ function parseFromText(text, url) {
   };
 }
 
-// Clean up already-saved jobs: strip markdown, re-extract skills & duties
+// Clean up already-saved jobs: strip markdown, re-extract skills, duties, requirements
 export function remigrateJob(j) {
   if (!j.description) return j;
   const cleaned = stripMd(j.description);
@@ -268,6 +297,7 @@ export function remigrateJob(j) {
     description: cleaned,
     skills: extractSkills(j.description),
     duties: j.duties || extractDuties(j.description),
+    qualifications: j.qualifications || extractRequirements(j.description),
   };
 }
 
@@ -333,6 +363,24 @@ export function extractSkills(content) {
   EXACT_CASE_SKILLS.forEach(s => {
     if (new RegExp(`\\b${s}\\b`).test(searchIn)) found.add(s);
   });
+
+  // When no quals section found, supplement with contextual phrases in full content
+  // e.g. "experience with Python", "proficiency in R", "knowledge of SQL"
+  if (!qualSection && found.size < 5) {
+    const contextRE = /(?:experience\s+(?:with|in|using)|proficiency\s+in|knowledge\s+of|familiarity\s+with|expertise\s+in|skilled\s+in|background\s+in|including\s+(?:but\s+not\s+limited\s+to\s+)?)\s+([^.,;\n]{3,60})/gi;
+    let m;
+    while ((m = contextRE.exec(content)) !== null) {
+      const phrase = m[1].toLowerCase();
+      const phraseRaw = m[1];
+      SKILL_KEYWORDS.forEach(s => {
+        const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`\\b${escaped}\\b`).test(phrase)) found.add(s);
+      });
+      EXACT_CASE_SKILLS.forEach(s => {
+        if (new RegExp(`\\b${s}\\b`).test(phraseRaw)) found.add(s);
+      });
+    }
+  }
 
   return [...found].slice(0, 14);
 }
@@ -574,9 +622,10 @@ Return ONLY valid JSON — no extra text:
   "company": "company or organization name",
   "location": "city/state or Remote or Hybrid. Empty string if not found.",
   "salary": "salary or pay range as written, or ''",
-  "description": "structured overview as 3-6 bullet points using '• ', covering what the team does, what this role owns, key goals, and reporting structure",
-  "skills": ["up to 14 specific tools, technologies, methods explicitly required — use exact terms from the text, include single-letter names like 'R' when listed as a required skill"],
+  "description": "2-3 sentence prose overview of what the team/org does and what this role owns. No bullets.",
   "duties": "key responsibilities as bullet points, one per line starting with '• ', aim for 6-10 bullets",
+  "requirements": "qualifications and requirements as bullet points, one per line starting with '• ', aim for 5-8 bullets",
+  "skills": ["up to 14 specific tools, technologies, methods explicitly required — use exact terms from the text, include single-letter names like 'R' when listed as a required skill"],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
 
@@ -593,7 +642,7 @@ ${rawText.slice(0, 4500)}`,
         benefits:   '',
         description: r.description || '',
         duties:     r.duties     || '',
-        qualifications: '',
+        qualifications: r.requirements || '',
         deadline:   r.deadline   || '',
         skills:     Array.isArray(r.skills) ? r.skills.slice(0, 14) : extractSkills(rawText),
         sponsorship: detectSponsorship(rawText),
@@ -690,9 +739,10 @@ Return ONLY valid JSON — no extra text:
   "company": "company or organization name",
   "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
-  "description": "structured overview of the role — 3-6 bullet points using '• ', covering: what the team/org does, what this role owns, key goals, reporting structure if mentioned. Skip generic company mission boilerplate.",
-  "skills": ["up to 14 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD (e.g. 'R', 'Python', 'BigQuery', 'dbt', 'GitHub', 'SQL', 'data visualization'). Include single-letter language names like 'R' when explicitly listed as a required tool. No generic soft-skill verbs."],
+  "description": "2-3 sentence prose overview of what the team/org does and what this role owns. Skip boilerplate company mission copy. No bullets.",
   "duties": "the key responsibilities as bullet points, one per line starting with '• '. Include all meaningful items from the Responsibilities section — aim for 6-10 bullets.",
+  "requirements": "qualifications and requirements as bullet points, one per line starting with '• '. Include all meaningful items from the Qualifications/Requirements section — aim for 5-8 bullets.",
+  "skills": ["up to 14 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD (e.g. 'R', 'Python', 'BigQuery', 'dbt', 'GitHub', 'SQL', 'data visualization'). Include single-letter language names like 'R' when explicitly listed as a required tool. No generic soft-skill verbs."],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
 
@@ -726,7 +776,7 @@ ${content.slice(0, 4000)}`,
     benefits: '',
     description: r.description || '',
     duties: r.duties || '',
-    qualifications: '',
+    qualifications: r.requirements || '',
     deadline: r.deadline || '',
     skills: Array.isArray(r.skills) ? r.skills.slice(0, 10) : extractSkills(content),
     sponsorship: detectSponsorship(content),

@@ -271,6 +271,7 @@ export default function App() {
         salary:            p.salary    || job.salary,
         description:       p.description || job.description,
         duties:            p.duties    || job.duties,
+        qualifications:    p.qualifications || job.qualifications,
         skills:            Array.isArray(p.skills) && p.skills.length ? p.skills : job.skills,
         deadline:          p.deadline  || job.deadline,
         sponsorship:       p.sponsorship || job.sponsorship,
@@ -595,7 +596,19 @@ export default function App() {
                     {job.description && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Description</h4>
-                        <p className="sec-body pre">{stripMd(job.description)}</p>
+                        <p className="sec-body">{stripMd(job.description)}</p>
+                      </div>
+                    )}
+                    {job.duties && (
+                      <div className="d-section wide">
+                        <h4 className="sec-title">Major Duties</h4>
+                        <p className="sec-body pre">{job.duties}</p>
+                      </div>
+                    )}
+                    {job.qualifications && (
+                      <div className="d-section wide">
+                        <h4 className="sec-title">Requirements</h4>
+                        <p className="sec-body pre">{job.qualifications}</p>
                       </div>
                     )}
                     {(job.skills || []).length > 0 && (
@@ -604,12 +617,6 @@ export default function App() {
                         <div className="d-skills">
                           {job.skills.map((s, i) => <span key={i} className="skill-chip">{s}</span>)}
                         </div>
-                      </div>
-                    )}
-                    {job.duties && (
-                      <div className="d-section wide">
-                        <h4 className="sec-title">Major Duties</h4>
-                        <p className="sec-body pre">{job.duties}</p>
                       </div>
                     )}
                     {job.deadline && (
