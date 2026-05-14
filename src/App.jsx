@@ -132,6 +132,7 @@ export default function App() {
 
   // Paste-to-extract panel
   const [pasteText, setPasteText]         = useState('');
+  const [pasteUrl, setPasteUrl]           = useState('');
   const [extractingPaste, setExtractingPaste] = useState(false);
 
   // Persist
@@ -221,7 +222,7 @@ export default function App() {
         sponsorship: p.sponsorship || 'Unknown',
         union:       p.union       || 'Unknown',
         deadline:    p.deadline    || '',
-        url:         '',
+        url:         pasteUrl.trim(),
         skills:      Array.isArray(p.skills) ? p.skills : [],
         qualifications: p.qualifications || '',
         description: p.description || '',
@@ -236,6 +237,7 @@ export default function App() {
       };
       setJobs(prev => [job, ...prev]);
       setPasteText('');
+      setPasteUrl('');
       setPanel(null);
       if (activeTab !== 'saved') setActiveTab('saved');
       showToast('Position extracted & added!');
@@ -451,6 +453,13 @@ export default function App() {
             rows={12}
             value={pasteText}
             onChange={e => setPasteText(e.target.value)}
+          />
+          <input
+            className="f-input"
+            style={{ marginTop: 10 }}
+            placeholder="Application link (optional)"
+            value={pasteUrl}
+            onChange={e => setPasteUrl(e.target.value)}
           />
           <button
             className="btn-primary"
