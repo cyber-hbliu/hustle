@@ -365,8 +365,11 @@ function parseFromText(text, url) {
 export function remigrateJob(j) {
   if (!j.description) return j;
   const cleaned = stripMd(j.description);
+  // Normalize stored location — fixes sentence-fragment locations from old extractions
+  const location = j.location ? (normalizeLocation(j.location) || j.location) : j.location;
   return {
     ...j,
+    location,
     description: cleaned,
     skills: extractSkills(j.description),
     duties: j.duties || extractDuties(j.description),
@@ -455,30 +458,59 @@ export function extractSkills(content) {
 }
 
 // Extract location from job content — handles Remote, Hybrid, City/ST, label lines
+// Normalize any raw location string to "Remote", "Hybrid", "City, ST",
+// or combinations — strips sentence prose and non-location words
+function normalizeLocation(raw) {
+  if (!raw) return '';
+  const s = stripMd(raw).replace(/\s+/g, ' ').trim();
+
+  const modeM = s.match(/\b(Remote|Hybrid|On[\s-]?[Ss]ite)\b/i);
+  // "City, ST" — up to 3-word city name
+  const cityStateM = s.match(/\b([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,15}){0,2}),\s*([A-Z]{2})\b/);
+  // "in our New York City office / HQ / campus" — city without state code
+  const inCityM = !cityStateM && s.match(
+    /\bin\s+(?:our\s+|the\s+)?([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,15}){0,2})\s+(?:office|HQ|campus|headquarters)\b/i
+  );
+
+  const mode = modeM
+    ? modeM[1].charAt(0).toUpperCase() + modeM[1].slice(1).toLowerCase().replace('site', 'Site')
+    : '';
+  const city = cityStateM
+    ? `${cityStateM[1]}, ${cityStateM[2]}`
+    : inCityM
+    ? inCityM[1].trim()
+    : '';
+
+  if (mode && city) return `${mode} — ${city}`;
+  if (mode) return mode;
+  if (city) return city;
+  return '';
+}
+
 function extractLocation(content) {
-  // 1. Explicit "Location: ..." label
+  // 1. Explicit "Location: ..." label — normalize to strip sentence prose
   const byLabel = content.match(
-    /(?:^|\n)\s*\*{0,2}(?:location|work\s+location|job\s+location|office\s+location)\*{0,2}\s*[:\s–-]+([^\n*]{3,70})/im
+    /(?:^|\n)\s*\*{0,2}(?:location|work\s+location|job\s+location|office\s+location)\*{0,2}\s*[:\s–-]+([^\n*]{3,120})/im
   );
   if (byLabel) {
-    const loc = stripMd(byLabel[1]).trim();
-    if (loc.length > 2) return loc.slice(0, 80);
+    const clean = normalizeLocation(byLabel[1]);
+    if (clean) return clean;
   }
 
-  // 2. Remote / Hybrid / On-site — optionally followed by a city
-  const remoteM = content.match(
-    /\b(Remote|Hybrid|On[\s-]?[Ss]ite)\b(?:\s*[-–(\/,]\s*([A-Z][a-zA-Z\s.]{2,35}(?:,\s*[A-Z][a-zA-Z]{0,18})?))?/
-  );
+  // 2. Remote / Hybrid / On-site keyword in content
+  const remoteM = content.match(/\b(Remote|Hybrid|On[\s-]?[Ss]ite)\b/i);
   if (remoteM) {
-    const city = remoteM[2]?.replace(/[()]/g, '').trim();
-    return (city ? `${remoteM[1]} — ${city}` : remoteM[1]).slice(0, 80);
+    // Look for a "City, ST" near the keyword (±200 chars)
+    const idx = content.search(/\b(?:Remote|Hybrid|On[\s-]?[Ss]ite)\b/i);
+    const window = content.slice(Math.max(0, idx - 50), idx + 200);
+    const cityM = window.match(/\b([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,15}){0,2}),\s*([A-Z]{2})\b/);
+    const mode = remoteM[1].charAt(0).toUpperCase() + remoteM[1].slice(1).toLowerCase().replace('site', 'Site');
+    return cityM ? `${mode} — ${cityM[1]}, ${cityM[2]}` : mode;
   }
 
-  // 3. "City, ST" pattern (search in first 3000 chars to avoid footer noise)
+  // 3. "City, ST" in first 3000 chars
   const early = content.slice(0, 3000);
-  const cityM = early.match(
-    /\b([A-Z][a-z]{2,18}(?:[\s-][A-Z][a-z]{2,15})?),\s*([A-Z]{2})\b/
-  );
+  const cityM = early.match(/\b([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,15}){0,1}),\s*([A-Z]{2})\b/);
   if (cityM) return `${cityM[1]}, ${cityM[2]}`;
 
   return '';
@@ -689,7 +721,7 @@ Return ONLY valid JSON — no extra text:
 {
   "position": "exact job title only",
   "company": "company or organization name",
-  "location": "city/state or Remote or Hybrid. Empty string if not found.",
+  "location": "short location only — one of: 'Remote', 'Hybrid', 'New York, NY', 'Hybrid — New York, NY', etc. City name or state name only. Never a full sentence. Empty string if not found.",
   "salary": "salary or pay range as written, or ''",
   "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip boilerplate mission copy. No bullets.",
   "duties": "key responsibilities as bullet points, one per line starting with '• '. Use **bold** on the opening action verb of each bullet (e.g. '• **Lead** quantitative analysis...') and on any specific tool or technology names. Aim for 6-10 bullets.",
@@ -806,7 +838,7 @@ Return ONLY valid JSON — no extra text:
 {
   "position": "exact job title only, no company or location appended",
   "company": "company or organization name",
-  "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
+  "location": "short location only — 'Remote', 'Hybrid', 'New York, NY', 'Hybrid — New York, NY', etc. City/state only, never a full sentence. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
   "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip generic company mission boilerplate. No bullets.",
   "duties": "key responsibilities as bullet points, one per line starting with '• '. Use **bold** on the opening action verb of each bullet (e.g. '• **Lead** quantitative analysis...') and on any specific tool or technology names. Aim for 6-10 bullets.",
