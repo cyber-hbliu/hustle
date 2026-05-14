@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { parseJobUrl, analyzeMatch, generateCoverLetter, getApiKey, setApiKey, extractSkills, remigrateJob } from './api';
+import { parseJobUrl, parseFromPaste, analyzeMatch, generateCoverLetter, getApiKey, setApiKey, extractSkills, remigrateJob } from './api';
 
 // ─── Constants ─────────────────────────────────────────────────────────
 const STATUSES = [
@@ -130,13 +130,9 @@ export default function App() {
   const [generating, setGenerating] = useState(false);
   const [clStep, setClStep]         = useState('idle');
 
-  // Manual form
-  const emptyManual = {
-    position: '', company: '', location: '', salary: '', benefits: '',
-    sponsorship: 'Unknown', union: 'Unknown', deadline: '', url: '',
-    description: '', skills: '', qualifications: '', worker_protections: '', community_focus: '',
-  };
-  const [manualData, setManualData] = useState(emptyManual);
+  // Paste-to-extract panel
+  const [pasteText, setPasteText]         = useState('');
+  const [extractingPaste, setExtractingPaste] = useState(false);
 
   // Persist
   useEffect(() => save('hs-jobs', jobs), [jobs]);
@@ -207,26 +203,47 @@ export default function App() {
     }
   };
 
-  // ── Manual add ──
-  const handleManual = () => {
-    if (!manualData.position.trim()) return;
-    const skills = manualData.skills
-      ? manualData.skills.split(',').map(s => s.trim()).filter(Boolean)
-      : [];
-    const job = {
-      id: crypto.randomUUID(),
-      ...manualData,
-      skills,
-      status: 'saved',
-      coverLetter: '',
-      analysis: null,
-      notes: '',
-      createdAt: new Date().toISOString(),
-    };
-    setJobs(prev => [job, ...prev]);
-    setManualData(emptyManual);
-    setPanel(null);
-    showToast('Position added!');
+  // ── Paste & extract ──
+  const handlePasteExtract = async () => {
+    const text = pasteText.trim();
+    if (!text) return;
+    setExtractingPaste(true);
+    setError('');
+    try {
+      const p = await parseFromPaste(text);
+      const job = {
+        id: crypto.randomUUID(),
+        position:    p.position    || 'Untitled',
+        company:     p.company     || '',
+        location:    p.location    || '',
+        salary:      p.salary      || '',
+        benefits:    p.benefits    || '',
+        sponsorship: p.sponsorship || 'Unknown',
+        union:       p.union       || 'Unknown',
+        deadline:    p.deadline    || '',
+        url:         '',
+        skills:      Array.isArray(p.skills) ? p.skills : [],
+        qualifications: p.qualifications || '',
+        description: p.description || '',
+        duties:      p.duties      || '',
+        worker_protections: p.worker_protections || '',
+        community_focus:    p.community_focus    || '',
+        status:      'saved',
+        coverLetter: '',
+        analysis:    null,
+        notes:       '',
+        createdAt:   new Date().toISOString(),
+      };
+      setJobs(prev => [job, ...prev]);
+      setPasteText('');
+      setPanel(null);
+      if (activeTab !== 'saved') setActiveTab('saved');
+      showToast('Position extracted & added!');
+    } catch (err) {
+      setError(err.message || 'Could not extract job info from the pasted text.');
+    } finally {
+      setExtractingPaste(false);
+    }
   };
 
   // ── Job mutations ──
@@ -421,32 +438,33 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Manual Panel ── */}
+      {/* ── Paste Panel ── */}
       {panel === 'manual' && (
         <div className="panel anim-in">
-          <div className="m-grid">
-            <input className="f-input" placeholder="Position *" value={manualData.position} onChange={e => setManualData({ ...manualData, position: e.target.value })} />
-            <input className="f-input" placeholder="Company" value={manualData.company} onChange={e => setManualData({ ...manualData, company: e.target.value })} />
-            <input className="f-input" placeholder="Location" value={manualData.location} onChange={e => setManualData({ ...manualData, location: e.target.value })} />
-            <input className="f-input" placeholder="Salary range" value={manualData.salary} onChange={e => setManualData({ ...manualData, salary: e.target.value })} />
-            <input className="f-input" type="date" value={manualData.deadline} onChange={e => setManualData({ ...manualData, deadline: e.target.value })} />
-            <input className="f-input" placeholder="Skills (comma-separated)" value={manualData.skills} onChange={e => setManualData({ ...manualData, skills: e.target.value })} />
-            <select className="f-input" value={manualData.sponsorship} onChange={e => setManualData({ ...manualData, sponsorship: e.target.value })}>
-              <option value="Unknown">Sponsorship: Unknown</option>
-              <option value="Yes">Sponsorship: Yes</option>
-              <option value="No">Sponsorship: No</option>
-            </select>
-            <select className="f-input" value={manualData.union} onChange={e => setManualData({ ...manualData, union: e.target.value })}>
-              <option value="Unknown">Union: Unknown</option>
-              <option value="Yes">Union: Yes</option>
-              <option value="No">Union: No</option>
-            </select>
-            <input className="f-input full" placeholder="Job URL" value={manualData.url} onChange={e => setManualData({ ...manualData, url: e.target.value })} />
-            <textarea className="f-input full" placeholder="Job description…" rows={3} value={manualData.description} onChange={e => setManualData({ ...manualData, description: e.target.value })} />
-          </div>
-          <button className="btn-primary" style={{ marginTop: 14 }} onClick={handleManual}>
-            Save Position
+          <label className="f-label">
+            Paste the full job posting text
+            <span className="f-hint-inline"> — works for any site where URL scraping fails</span>
+          </label>
+          <textarea
+            className="f-textarea paste-area"
+            placeholder={"Copy everything from the job page and paste it here — title, description, responsibilities, qualifications, salary, location…\n\nThe app will extract and structure it automatically."}
+            rows={12}
+            value={pasteText}
+            onChange={e => setPasteText(e.target.value)}
+          />
+          <button
+            className="btn-primary"
+            style={{ marginTop: 12 }}
+            onClick={handlePasteExtract}
+            disabled={!pasteText.trim() || extractingPaste}
+          >
+            {extractingPaste ? (hasApiKey ? 'Analyzing…' : 'Extracting…') : 'Extract & Add'}
           </button>
+          {!hasApiKey && (
+            <span className="f-hint" style={{ marginTop: 8, display: 'block' }}>
+              Add an API key in Settings for smarter AI-powered extraction.
+            </span>
+          )}
         </div>
       )}
 

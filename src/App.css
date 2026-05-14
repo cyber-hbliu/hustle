@@ -238,6 +238,7 @@ body {
   transition: border-color .15s;
 }
 .f-textarea:focus { border-color: #1b1b1b; background: #fff; }
+.paste-area { min-height: 220px; font-size: 13px; line-height: 1.5; }
 
 .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; }
 

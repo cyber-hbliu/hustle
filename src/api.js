@@ -557,6 +557,81 @@ export async function parseJobUrl(url) {
   throw new Error("Couldn't extract details from this page — the site may block automated access. Try copying the job details and using manual entry.");
 }
 
+// Parse a job posting from raw pasted text (no URL needed)
+export async function parseFromPaste(rawText) {
+  // AI path: structured extraction with Claude
+  if (getApiKey()) {
+    try {
+      const data = await callClaude({
+        maxTokens: 1000,
+        messages: [{
+          role: 'user',
+          content: `Extract structured information from this job posting text. The user copied and pasted it directly from a job website.
+
+Return ONLY valid JSON — no extra text:
+{
+  "position": "exact job title only",
+  "company": "company or organization name",
+  "location": "city/state or Remote or Hybrid. Empty string if not found.",
+  "salary": "salary or pay range as written, or ''",
+  "description": "structured overview as 3-6 bullet points using '• ', covering what the team does, what this role owns, key goals, and reporting structure",
+  "skills": ["up to 14 specific tools, technologies, methods explicitly required — use exact terms from the text, include single-letter names like 'R' when listed as a required skill"],
+  "duties": "key responsibilities as bullet points, one per line starting with '• ', aim for 6-10 bullets",
+  "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
+}
+
+Job posting text:
+${rawText.slice(0, 4500)}`,
+        }],
+      });
+      const r = parseJSON(extractText(data));
+      return {
+        position:   r.position   || '',
+        company:    r.company    || '',
+        location:   r.location   || extractLocation(rawText),
+        salary:     r.salary     || parseSalary(rawText),
+        benefits:   '',
+        description: r.description || '',
+        duties:     r.duties     || '',
+        qualifications: '',
+        deadline:   r.deadline   || '',
+        skills:     Array.isArray(r.skills) ? r.skills.slice(0, 14) : extractSkills(rawText),
+        sponsorship: detectSponsorship(rawText),
+        union:       detectUnion(rawText),
+        worker_protections: extractWorkerProtections(rawText),
+        community_focus:    detectCommunityFocus(rawText),
+      };
+    } catch (err) {
+      console.warn('AI paste extraction failed, using heuristics:', err.message);
+    }
+  }
+
+  // Heuristic path (no API key)
+  // First line that looks like a title (not a URL, not nav text, not too long)
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  const titleLine = lines.find(l =>
+    l.length > 4 && l.length < 120 && !/^https?:/.test(l) && !NAV_RE.test(l)
+  ) || '';
+  const parsed = parsePageTitle(titleLine, '');
+
+  return {
+    position:   parsed.position || titleLine.replace(/[|–-].*$/, '').trim(),
+    company:    parsed.company  || '',
+    location:   parsed.location || extractLocation(rawText),
+    salary:     parseSalary(rawText),
+    benefits:   '',
+    description: extractDescription(rawText),
+    duties:      extractDuties(rawText),
+    qualifications: '',
+    deadline:    '',
+    skills:      extractSkills(rawText),
+    sponsorship: detectSponsorship(rawText),
+    union:       detectUnion(rawText),
+    worker_protections: extractWorkerProtections(rawText),
+    community_focus:    detectCommunityFocus(rawText),
+  };
+}
+
 // ─── Optional AI Features (require API key) ────────────────────────────
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
