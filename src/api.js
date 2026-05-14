@@ -194,15 +194,41 @@ function extractDescription(content) {
 // Shared regex stop condition for plain-text section breaks
 const SECTION_STOP = `(?=\\n#{1,3}\\s|\\n\\*{2}[A-Z][^\\n]*\\*{2}|\\n---|\\n\\n[A-Z][^\\n]{0,70}:\\s*\\n)`;
 
-// Bold degree/experience markers within a requirement bullet
+// Tool/language names that should always be highlighted when explicitly mentioned
+const HIGHLIGHT_TOOLS = [
+  'Python', 'SQL', 'BigQuery', 'Tableau', 'Looker', 'Stata', 'ArcGIS', 'QGIS',
+  'GitHub', 'dbt', 'Airflow', 'Spark', 'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes',
+  'Snowflake', 'Redshift', 'Databricks', 'TensorFlow', 'PyTorch', 'Scikit-learn',
+  'JavaScript', 'TypeScript', 'Scala', 'Golang', 'Bash', 'Linux', 'Terraform',
+];
+
+function applyToolBold(b) {
+  HIGHLIGHT_TOOLS.forEach(t => {
+    b = b.replace(new RegExp(`\\b${t}\\b`, 'g'), `**${t}**`);
+  });
+  b = b.replace(/\bR\b/g, '**R**'); // case-sensitive standalone
+  // Clean any accidental ****double-bold****
+  return b.replace(/\*{4}([^*]+)\*{4}/g, '**$1**');
+}
+
+// Bold degree/experience markers + specific tools within a requirement bullet
 function boldReqLine(b) {
   // Degree level
   b = b.replace(/((?:Master|Bachelor|PhD|Doctoral|Graduate|Associate)'?s?\s+degree\b[^,;]*)/, '**$1**');
-  // Experience duration: "at least N year(s)", "N+ years", "X to Y years"
+  // Experience duration: "at least N year(s)", "N+ years", "1-3 years"
   b = b.replace(/\b((?:at\s+least\s+)?(?:\d+\+?(?:\s*(?:–|-|to)\s*\d+)?)\s+years?\s+(?:of\s+)?(?:relevant\s+|related\s+)?(?:work\s+)?experience)/i, '**$1**');
-  // "Advanced knowledge", "Expertise in", "Proficiency in", "Demonstrated" openers
+  // "Advanced knowledge", "Expertise in", "Demonstrated" openers
   b = b.replace(/^((?:Advanced|Expert(?:ise)?|Proficien[ct]\w*|Strong|Demonstrated|Proven|Excellent)\s+(?:knowledge|experience|ability|command|understanding|skill)\b[^,]*)/i, '**$1**');
-  return b;
+  // Tool name after explicit contextual marker: "expertise in R", "proficiency in Python"
+  b = b.replace(/\b(expertise|proficiency|proficient|knowledge|experience|background)\s+(in|with|using)\s+([A-Z][a-zA-Z+#.]{0,15})\b/gi, '$1 $2 **$3**');
+  return b.replace(/\*{4}([^*]+)\*{4}/g, '**$1**');
+}
+
+// Bold the opening action verb + any tool/language names in a duty bullet
+function boldDutyLine(b) {
+  // Opening action verb (e.g. "Lead", "Build and maintain", "Analyze")
+  b = b.replace(/^([A-Z][a-zA-Z]+(?:\s+(?:and|&|or)\s+[a-z][a-zA-Z]+)?)\b/, '**$1**');
+  return applyToolBold(b);
 }
 
 // Extract qualifications/requirements with Required/Preferred distinction
@@ -234,7 +260,7 @@ function extractRequirements(content) {
     }
     if (prefItems.length > 0) {
       if (reqItems.length > 0) lines.push('**Preferred:**');
-      prefItems.forEach(b => lines.push('• ' + b));
+      prefItems.forEach(b => lines.push('• ' + boldReqLine(b)));
     }
     return lines.join('\n').slice(0, 1500);
   }
@@ -259,12 +285,12 @@ function extractDuties(content) {
   if (bullets.length >= 2) {
     return bullets
       .slice(0, 10)
-      .map(b => '• ' + stripMd(b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim()))
+      .map(b => '• ' + boldDutyLine(stripMd(b.replace(/^[-•*▪◦✓\d.]+\s*/, '').trim())))
       .join('\n')
-      .slice(0, 1200);
+      .slice(0, 1400);
   }
   const lines = stripMd(raw).split(/\n+/).filter(l => l.trim().length > 25 && !NAV_RE.test(l));
-  return lines.slice(0, 8).map(l => '• ' + l.trim().replace(/^[•\-]\s*/, '')).join('\n').slice(0, 900);
+  return lines.slice(0, 8).map(l => '• ' + boldDutyLine(l.trim().replace(/^[•\-]\s*/, ''))).join('\n').slice(0, 1000);
 }
 
 // Parse Jina's markdown output (Title: / URL Source: / Markdown Content: format)
@@ -657,7 +683,7 @@ Return ONLY valid JSON — no extra text:
   "location": "city/state or Remote or Hybrid. Empty string if not found.",
   "salary": "salary or pay range as written, or ''",
   "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip boilerplate mission copy. No bullets.",
-  "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
+  "duties": "key responsibilities as bullet points, one per line starting with '• '. Use **bold** on the opening action verb of each bullet (e.g. '• **Lead** quantitative analysis...') and on any specific tool or technology names. Aim for 6-10 bullets.",
   "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience'. Aim for 5-10 bullets total.",
   "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
@@ -774,7 +800,7 @@ Return ONLY valid JSON — no extra text:
   "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
   "description": "3-5 sentence prose overview. Include: what the team/org does, what this role specifically owns or builds, and any key tools or deliverables mentioned in the intro. Skip generic company mission boilerplate. No bullets.",
-  "duties": "key responsibilities as bullet points, one per line starting with '• '. Aim for 6-10 bullets.",
+  "duties": "key responsibilities as bullet points, one per line starting with '• '. Use **bold** on the opening action verb of each bullet (e.g. '• **Lead** quantitative analysis...') and on any specific tool or technology names. Aim for 6-10 bullets.",
   "requirements": "qualifications as bullet points, one per line starting with '• '. If the posting has separate Required and Preferred sections, output a '**Required:**' label line, those bullets, a '**Preferred:**' label line, then those bullets. Use **bold** on the critical qualifier in each bullet — e.g. '• **Master\\'s degree** in public policy…', '• **At least 1 year** of relevant experience', '• **Expertise in R** preferred'. Aim for 5-10 bullets total.",
   "skills": ["up to 14 specific tools, technologies, or domain skills explicitly named — e.g. 'R', 'Python', 'SQL', 'data visualization', 'research methods', 'quantitative analysis'. Include single-letter names like 'R' when listed. No generic soft-skill verbs."],
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"

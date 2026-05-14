@@ -536,7 +536,7 @@ export default function App() {
                     {job.description && (
                       <div className="d-section wide">
                         <h4 className="sec-title">Description</h4>
-                        <p className="sec-body">{stripMd(job.description)}</p>
+                        <div className="sec-body">{renderText(stripMd(job.description))}</div>
                       </div>
                     )}
                     {job.duties && (
