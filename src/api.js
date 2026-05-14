@@ -275,36 +275,66 @@ function cleanText(str = '') {
   return str.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Case-insensitive skills — multi-word or long enough to be unambiguous
 const SKILL_KEYWORDS = [
-  'python', 'r programming', 'sql', 'excel', 'tableau', 'power bi', 'javascript', 'typescript',
-  'react', 'node.js', 'java', 'c++', 'c#', 'golang', 'rust', 'scala', 'spark', 'hadoop',
-  'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'linux', 'bash', 'terraform',
+  // Languages
+  'python', 'sql', 'javascript', 'typescript', 'java', 'c++', 'c#', 'golang', 'scala', 'bash',
+  // BI & Visualization
+  'tableau', 'power bi', 'looker', 'looker studio', 'excel', 'google sheets',
+  'data visualization', 'dashboard', 'dashboards', 'reporting',
+  // Cloud Data Warehouses & Query Engines
+  'bigquery', 'snowflake', 'redshift', 'databricks', 'spark', 'hadoop', 'presto', 'athena',
+  // Cloud Platforms
+  'aws', 'azure', 'gcp', 'google cloud',
+  // DevOps & Version Control
+  'docker', 'kubernetes', 'terraform', 'linux', 'git', 'github',
+  // Data Engineering
+  'dbt', 'airflow', 'etl', 'data pipeline', 'data pipelines', 'data transformation',
+  'data modeling', 'data warehousing', 'data engineering',
+  // Analytics & ML
   'machine learning', 'deep learning', 'nlp', 'tensorflow', 'pytorch', 'scikit-learn',
-  'data analysis', 'data visualization', 'statistics', 'econometrics', 'gis', 'arcgis', 'qgis',
-  'stata', 'spss', 'sas', 'matlab', 'julia', 'dbt', 'airflow', 'looker',
-  'project management', 'stakeholder engagement', 'grant writing', 'policy analysis',
-  'qualitative research', 'quantitative research', 'program evaluation', 'community outreach',
-  'case management', 'social work', 'public health', 'epidemiology', 'biostatistics',
-  'budget management', 'fundraising', 'communications', 'content writing',
+  'data analysis', 'statistical analysis', 'statistics', 'econometrics',
+  'quantitative research', 'qualitative research',
+  // Spatial
+  'gis', 'arcgis', 'qgis',
+  // Statistical Tools
+  'stata', 'spss', 'sas', 'matlab', 'julia',
+  // Domain / Soft Skills
+  'policy analysis', 'program evaluation', 'project management', 'stakeholder engagement',
+  'grant writing', 'community outreach', 'case management', 'social work',
+  'public health', 'epidemiology', 'biostatistics', 'budget management',
+  'fundraising', 'communications',
 ];
 
+// Single-letter or short language names matched case-sensitively to avoid false positives
+// e.g. "R" matches "Python, R, SQL" but not "our", "for", "work"
+const EXACT_CASE_SKILLS = ['R'];
+
 // Find the qualifications / requirements / skills section so we only
-// match skill keywords where they're explicitly listed, not incidentally
+// match keywords where they're explicitly listed, not mentioned incidentally
 function extractQualSection(content) {
   const m = content.match(
-    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?)\*{0,2}\s*:?\s*\n([\s\S]{50,2000}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,60}:\s*\n)/im
+    /(?:^|\n)#{0,3}\s*\*{0,2}(?:qualifications?|requirements?|what you(?:'ll)?\s+bring|skills?\s+(?:and\s+)?(?:experience|required)|technical\s+skills?|minimum\s+qualifications?|preferred\s+qualifications?|basic\s+qualifications?|experience\s+(?:and\s+)?skills?|desired\s+(?:skills?|qualifications?))\*{0,2}\s*:?\s*\n([\s\S]{50,2500}?)(?=\n#{1,3}\s|\n\*{2}[A-Z][^\n]*\*{2}|\n---|\n\n[A-Z][^\n]{0,60}:\s*\n)/im
   );
   return m ? m[1] : null;
 }
 
 export function extractSkills(content) {
-  // Prefer searching within the qualifications section to avoid false positives
   const qualSection = extractQualSection(content);
-  const lower = (qualSection || content).toLowerCase();
-  return [...new Set(SKILL_KEYWORDS.filter(s => {
+  const searchIn = qualSection || content;
+  const lower = searchIn.toLowerCase();
+
+  const found = new Set(SKILL_KEYWORDS.filter(s => {
     const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`\\b${escaped}\\b`).test(lower);
-  }))].slice(0, 12);
+  }));
+
+  // Case-sensitive pass for short/ambiguous names like "R"
+  EXACT_CASE_SKILLS.forEach(s => {
+    if (new RegExp(`\\b${s}\\b`).test(searchIn)) found.add(s);
+  });
+
+  return [...found].slice(0, 14);
 }
 
 // Extract location from job content — handles Remote, Hybrid, City/ST, label lines
@@ -586,7 +616,7 @@ Return ONLY valid JSON — no extra text:
   "location": "exact location as stated — 'Remote', 'Hybrid — New York, NY', 'New York, NY', etc. Empty string if truly not found.",
   "salary": "salary range as written in the posting, or ''",
   "description": "structured overview of the role — 3-6 bullet points using '• ', covering: what the team/org does, what this role owns, key goals, reporting structure if mentioned. Skip generic company mission boilerplate.",
-  "skills": ["up to 12 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD, no single letters, no generic verbs like 'communicate'"],
+  "skills": ["up to 14 specific tools, technologies, methods, or domain skills explicitly named in the qualifications/requirements — use the exact terms from the JD (e.g. 'R', 'Python', 'BigQuery', 'dbt', 'GitHub', 'SQL', 'data visualization'). Include single-letter language names like 'R' when explicitly listed as a required tool. No generic soft-skill verbs."],
   "duties": "the key responsibilities as bullet points, one per line starting with '• '. Include all meaningful items from the Responsibilities section — aim for 6-10 bullets.",
   "deadline": "YYYY-MM-DD if an application deadline is stated, else ''"
 }
